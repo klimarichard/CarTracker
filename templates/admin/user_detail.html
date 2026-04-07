@@ -67,7 +67,7 @@
                         <a href="{{ url_for('car_detail', car_id=c.id) }}"
                            class="fw-medium text-decoration-none">{{ c.display_name }}</a>
                         {% if c.license_plate %}
-                        <span class="badge bg-light text-dark border ms-1 small">{{ c.license_plate }}</span>
+                        <span class="badge bg-secondary-subtle text-body border ms-1 small">{{ c.license_plate }}</span>
                         {% endif %}
                     </div>
                     <span class="text-muted small">{{ c.year or '' }}</span>
@@ -92,7 +92,7 @@
                         <a href="{{ url_for('car_detail', car_id=c.id) }}"
                            class="fw-medium text-decoration-none">{{ c.display_name }}</a>
                         {% if c.license_plate %}
-                        <span class="badge bg-light text-dark border ms-1 small">{{ c.license_plate }}</span>
+                        <span class="badge bg-secondary-subtle text-body border ms-1 small">{{ c.license_plate }}</span>
                         {% endif %}
                     </div>
                     <span class="text-muted small">{{ c.owner.username }}</span>

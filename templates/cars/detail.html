@@ -14,7 +14,7 @@
             {{ car.make or '' }} {{ car.model_name or '' }}
             {% if car.year %}· {{ car.year }}{% endif %}
             {% if car.license_plate %}
-            <span class="badge bg-light text-dark border ms-1">{{ car.license_plate }}</span>
+            <span class="badge bg-secondary-subtle text-body border ms-1">{{ car.license_plate }}</span>
             {% endif %}
         </div>
         {% endif %}
