@@ -7,7 +7,7 @@
         <i class="bi bi-table me-2 text-primary"></i>All Expenses
     </h4>
     <div class="d-flex gap-2">
-        <a href="{{ url_for('admin_overview_export', **request.args) }}"
+        <a href="{{ url_for('admin_overview_export') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}"
            class="btn btn-sm btn-outline-success rounded-3">
             <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
         </a>
