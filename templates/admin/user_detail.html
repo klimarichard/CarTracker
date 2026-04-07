@@ -1,0 +1,177 @@
+{% extends 'base.html' %}
+{% block title %}{{ profile.username }} — CarTracker Admin{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h4 class="fw-bold mb-0">
+            <i class="bi bi-person-circle me-2 text-primary"></i>{{ profile.username }}
+        </h4>
+        <div class="text-muted small mt-1">{{ profile.email }} &nbsp;·&nbsp; Member since {{ profile.created_at.strftime('%d.%m.%Y') }}</div>
+    </div>
+    <a href="{{ url_for('admin_index') }}" class="btn btn-sm btn-outline-secondary rounded-3">
+        <i class="bi bi-arrow-left me-1"></i>Back
+    </a>
+</div>
+
+{# ── Summary cards ── #}
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card h-100">
+            <div class="card-body text-center py-3">
+                <div class="fw-bold fs-4">{{ expenses | length }}</div>
+                <div class="text-muted small">Expenses</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card h-100">
+            <div class="card-body text-center py-3">
+                <div class="fw-bold fs-4">{{ total_czk | czk }}</div>
+                <div class="text-muted small">Total Spent</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card h-100">
+            <div class="card-body text-center py-3">
+                <div class="fw-bold fs-4">{{ owned_cars | length }}</div>
+                <div class="text-muted small">Cars Owned</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card h-100">
+            <div class="card-body text-center py-3">
+                <div class="fw-bold fs-4">{{ shared_cars | length }}</div>
+                <div class="text-muted small">Shared Cars</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Cars ── #}
+{% if owned_cars or shared_cars %}
+<div class="row g-3 mb-4">
+    {% if owned_cars %}
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header bg-transparent fw-medium small py-2">
+                <i class="bi bi-car-front me-1 text-primary"></i>Owned Cars
+            </div>
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush">
+                {% for c in owned_cars %}
+                <li class="list-group-item d-flex justify-content-between align-items-center px-3 py-2">
+                    <div>
+                        <a href="{{ url_for('car_detail', car_id=c.id) }}"
+                           class="fw-medium text-decoration-none">{{ c.display_name }}</a>
+                        {% if c.license_plate %}
+                        <span class="badge bg-light text-dark border ms-1 small">{{ c.license_plate }}</span>
+                        {% endif %}
+                    </div>
+                    <span class="text-muted small">{{ c.year or '' }}</span>
+                </li>
+                {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    {% if shared_cars %}
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header bg-transparent fw-medium small py-2">
+                <i class="bi bi-share me-1 text-secondary"></i>Shared Access
+            </div>
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush">
+                {% for c in shared_cars %}
+                <li class="list-group-item d-flex justify-content-between align-items-center px-3 py-2">
+                    <div>
+                        <a href="{{ url_for('car_detail', car_id=c.id) }}"
+                           class="fw-medium text-decoration-none">{{ c.display_name }}</a>
+                        {% if c.license_plate %}
+                        <span class="badge bg-light text-dark border ms-1 small">{{ c.license_plate }}</span>
+                        {% endif %}
+                    </div>
+                    <span class="text-muted small">{{ c.owner.username }}</span>
+                </li>
+                {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{# ── Expense breakdown ── #}
+{% if type_totals %}
+<div class="d-flex flex-wrap gap-2 mb-3">
+    {% for t in EXPENSE_TYPES if type_totals.get(t) %}
+    <span class="badge-type" style="background:{{ TYPE_COLORS[t] }}20;color:{{ TYPE_COLORS[t] }};border-color:{{ TYPE_COLORS[t] }}40">
+        <i class="bi {{ TYPE_ICONS[t] }}"></i> {{ TYPE_LABELS[t] }}: {{ type_totals[t] | czk }}
+    </span>
+    {% endfor %}
+</div>
+{% endif %}
+
+{# ── Expenses table ── #}
+<div class="card">
+    <div class="card-body p-0">
+        {% if expenses %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="fw-medium px-4">Date</th>
+                        <th class="fw-medium">Car</th>
+                        <th class="fw-medium">Type</th>
+                        <th class="fw-medium d-none d-md-table-cell">Details</th>
+                        <th class="fw-medium text-end pe-4">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for e in expenses %}
+                <tr>
+                    <td class="px-4 text-nowrap">
+                        <span class="fw-medium">{{ e.date.strftime('%d.%m.%Y') }}</span>
+                        {% if e.expense_type == 'fuel' and e.fuel_detail and e.fuel_detail.transaction_time %}
+                        <br><span class="text-muted small">{{ e.fuel_detail.transaction_time.strftime('%H:%M') }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="small fw-medium">
+                        <a href="{{ url_for('car_detail', car_id=e.car_id) }}"
+                           class="text-decoration-none">{{ e.car.name }}</a>
+                    </td>
+                    <td>
+                        <span class="badge-type" style="background:{{ TYPE_COLORS[e.expense_type] }}20;color:{{ TYPE_COLORS[e.expense_type] }};border-color:{{ TYPE_COLORS[e.expense_type] }}40">
+                            <i class="bi {{ TYPE_ICONS[e.expense_type] }}"></i>
+                            {{ TYPE_LABELS[e.expense_type] }}
+                        </span>
+                    </td>
+                    <td class="text-muted small d-none d-md-table-cell" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                        {% if e.detail %}{{ e.detail.summary }}{% endif %}
+                        {% if e.notes %}<span class="fst-italic"> · {{ e.notes }}</span>{% endif %}
+                    </td>
+                    <td class="text-end pe-4 text-nowrap fw-medium">
+                        {{ e.amount_czk | czk }}
+                        {% if e.currency != 'CZK' %}
+                        <br><span class="text-muted small fw-normal">{{ e.amount }} {{ e.currency }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-5">
+            <i class="bi bi-inbox fs-1 d-block mb-2 opacity-25"></i>
+            This user has no expenses yet.
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

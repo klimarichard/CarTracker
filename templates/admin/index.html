@@ -34,11 +34,15 @@
                                  style="width:32px;height:32px;font-size:.85rem;flex-shrink:0">
                                 <i class="bi bi-person text-secondary"></i>
                             </div>
-                            <span class="fw-medium">{{ user.username }}
-                                {% if user.id == current_user.id %}
-                                <span class="badge bg-light text-muted border small ms-1">you</span>
-                                {% endif %}
-                            </span>
+                            {% if not user.is_admin %}
+                            <a href="{{ url_for('admin_user_detail', user_id=user.id) }}"
+                               class="fw-medium text-decoration-none">{{ user.username }}</a>
+                            {% else %}
+                            <span class="fw-medium">{{ user.username }}</span>
+                            {% endif %}
+                            {% if user.id == current_user.id %}
+                            <span class="badge bg-light text-muted border small ms-1">you</span>
+                            {% endif %}
                         </div>
                     </td>
                     <td class="text-muted small">{{ user.email }}</td>

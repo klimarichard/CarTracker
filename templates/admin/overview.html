@@ -14,39 +14,59 @@
 {# ── Filters ── #}
 <div class="card mb-4">
     <div class="card-body py-3">
-        <form method="GET" action="{{ url_for('admin_overview') }}" class="row g-2 align-items-end">
-            <div class="col-sm-4">
-                <label class="form-label fw-medium small mb-1">User</label>
-                <select name="user_id" id="filterUser" class="form-select form-select-sm">
-                    <option value="">All users</option>
-                    {% for u in users %}
-                    <option value="{{ u.id }}" {% if sel_user_id == u.id %}selected{% endif %}>
-                        {{ u.username }}
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-sm-4">
-                <label class="form-label fw-medium small mb-1">Car</label>
-                <select name="car_id" id="filterCar" class="form-select form-select-sm">
-                    <option value="">All cars</option>
-                    {% for c in all_cars %}
-                    <option value="{{ c.id }}"
-                            data-owner="{{ c.owner_id }}"
-                            data-shared="{{ c.shares | map(attribute='user_id') | join(',') }}"
-                            {% if sel_car_id == c.id %}selected{% endif %}>
-                        {{ c.display_name }}
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-sm-auto">
+        <form method="GET" action="{{ url_for('admin_overview') }}" id="filterForm">
+            <div class="d-flex flex-wrap gap-2 align-items-end">
+
+                {# Users multi-select #}
+                <div>
+                    <div class="small fw-medium mb-1">Users</div>
+                    <div class="dropdown">
+                        <button type="button" class="btn btn-outline-secondary btn-sm rounded-3 dropdown-toggle"
+                                data-bs-toggle="dropdown" data-bs-auto-close="outside" id="userDropdownBtn">
+                            <span id="userLabel">All</span>
+                        </button>
+                        <div class="dropdown-menu p-2 shadow-sm" style="min-width:180px">
+                            {% for u in users %}
+                            <div class="form-check">
+                                <input class="form-check-input user-check" type="checkbox"
+                                       name="user_id" value="{{ u.id }}" id="uc_{{ u.id }}"
+                                       {% if u.id in sel_user_ids %}checked{% endif %}>
+                                <label class="form-check-label small" for="uc_{{ u.id }}">{{ u.username }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+
+                {# Cars multi-select #}
+                <div>
+                    <div class="small fw-medium mb-1">Cars</div>
+                    <div class="dropdown">
+                        <button type="button" class="btn btn-outline-secondary btn-sm rounded-3 dropdown-toggle"
+                                data-bs-toggle="dropdown" data-bs-auto-close="outside" id="carDropdownBtn">
+                            <span id="carLabel">All</span>
+                        </button>
+                        <div class="dropdown-menu p-2 shadow-sm" style="min-width:200px;max-height:260px;overflow-y:auto">
+                            {% for c in cars %}
+                            <div class="form-check car-check-row"
+                                 data-owner="{{ c.owner_id }}"
+                                 data-shared="{{ c.shares | map(attribute='user_id') | join(',') }}">
+                                <input class="form-check-input car-check" type="checkbox"
+                                       name="car_id" value="{{ c.id }}" id="cc_{{ c.id }}"
+                                       {% if c.id in sel_car_ids %}checked{% endif %}>
+                                <label class="form-check-label small" for="cc_{{ c.id }}">{{ c.display_name }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+
                 <button type="submit" class="btn btn-primary btn-sm rounded-3 px-3">
-                    <i class="bi bi-funnel me-1"></i>Filter
+                    <i class="bi bi-funnel me-1"></i>Apply
                 </button>
-                {% if sel_user_id or sel_car_id %}
-                <a href="{{ url_for('admin_overview') }}" class="btn btn-outline-secondary btn-sm rounded-3 ms-1">
-                    <i class="bi bi-x-lg"></i>
+                {% if sel_user_ids or sel_car_ids %}
+                <a href="{{ url_for('admin_overview') }}" class="btn btn-outline-secondary btn-sm rounded-3">
+                    <i class="bi bi-x-lg me-1"></i>Clear
                 </a>
                 {% endif %}
             </div>
@@ -105,7 +125,7 @@
                 </thead>
                 <tbody>
                 {% for e in expenses %}
-                <tr>
+                <tr class="expense-row" data-id="{{ e.id }}" style="cursor:pointer" title="Click for details">
                     <td class="px-4 text-nowrap">
                         <span class="fw-medium">{{ e.date.strftime('%d.%m.%Y') }}</span>
                         {% if e.expense_type == 'fuel' and e.fuel_detail and e.fuel_detail.transaction_time %}
@@ -113,10 +133,7 @@
                         {% endif %}
                     </td>
                     <td class="text-muted small">{{ e.user.username }}</td>
-                    <td class="small">
-                        <a href="{{ url_for('car_detail', car_id=e.car_id) }}"
-                           class="text-decoration-none fw-medium">{{ e.car.name }}</a>
-                    </td>
+                    <td class="small fw-medium">{{ e.car.name }}</td>
                     <td>
                         <span class="badge-type" style="background:{{ TYPE_COLORS[e.expense_type] }}20;color:{{ TYPE_COLORS[e.expense_type] }};border-color:{{ TYPE_COLORS[e.expense_type] }}40">
                             <i class="bi {{ TYPE_ICONS[e.expense_type] }}"></i>
@@ -125,7 +142,7 @@
                     </td>
                     <td class="text-muted small d-none d-md-table-cell" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
                         {% if e.detail %}{{ e.detail.summary }}{% endif %}
-                        {% if e.notes %}<span class="fst-italic">{{ e.notes }}</span>{% endif %}
+                        {% if e.notes %}<span class="fst-italic"> · {{ e.notes }}</span>{% endif %}
                     </td>
                     <td class="text-end pe-4 text-nowrap fw-medium">
                         {{ e.amount_czk | czk }}
@@ -146,32 +163,125 @@
         {% endif %}
     </div>
 </div>
+
+{# ── Expense detail modal ── #}
+<div class="modal fade" id="expenseModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content rounded-4 border-0 shadow">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title fw-bold" id="modalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-2" id="modalBody"></div>
+            <div class="modal-footer border-0 pt-0">
+                <button type="button" class="btn btn-outline-secondary btn-sm rounded-3" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-// When user filter changes, grey out car options that don't belong to that user
-const userSelect = document.getElementById('filterUser');
-const carSelect  = document.getElementById('filterCar');
+const EXPENSES = {{ expense_details | tojson }};
 
-userSelect.addEventListener('change', function () {
-    const userId = this.value;
-    Array.from(carSelect.options).forEach(opt => {
-        if (!opt.value) return; // "All cars" option
-        if (!userId) {
-            opt.hidden = false;
-        } else {
-            const owner  = opt.dataset.owner;
-            const shared = opt.dataset.shared ? opt.dataset.shared.split(',') : [];
-            opt.hidden = (owner !== userId && !shared.includes(userId));
+// ── Expense detail modal ──────────────────────────────────────────────────────
+const modal = new bootstrap.Modal(document.getElementById('expenseModal'));
+
+document.querySelectorAll('.expense-row').forEach(row => {
+    row.addEventListener('click', () => {
+        const e = EXPENSES[row.dataset.id];
+        if (!e) return;
+
+        document.getElementById('modalTitle').innerHTML =
+            `<i class="bi ${e.type_icon} me-2" style="color:${e.type_color}"></i>${e.type_label} — ${e.car}`;
+
+        let html = `
+            <div class="row g-2 mb-3 text-sm">
+                <div class="col-6">
+                    <div class="text-muted small">Date</div>
+                    <div class="fw-medium">${e.date}${e.time ? ' &nbsp;·&nbsp; ' + e.time : ''}</div>
+                </div>
+                <div class="col-6">
+                    <div class="text-muted small">User</div>
+                    <div class="fw-medium">${e.user}</div>
+                </div>
+                <div class="col-6">
+                    <div class="text-muted small">Amount</div>
+                    <div class="fw-medium">${e.amount_czk}</div>
+                </div>`;
+        if (e.orig) {
+            html += `<div class="col-6">
+                    <div class="text-muted small">Original</div>
+                    <div class="fw-medium">${e.orig}</div>
+                </div>`;
         }
+        html += `</div>`;
+
+        if (e.fields.length) {
+            html += `<hr class="my-2"><div class="row g-2">`;
+            e.fields.forEach(([label, val]) => {
+                html += `<div class="col-6">
+                    <div class="text-muted small">${label}</div>
+                    <div class="fw-medium">${val}</div>
+                </div>`;
+            });
+            html += `</div>`;
+        }
+
+        if (e.notes) {
+            html += `<hr class="my-2"><div class="text-muted small">Notes</div>
+                     <div class="fst-italic small">${e.notes}</div>`;
+        }
+
+        document.getElementById('modalBody').innerHTML = html;
+        modal.show();
     });
-    // Reset car selection if currently selected car is now hidden
-    const selected = carSelect.options[carSelect.selectedIndex];
-    if (selected && selected.hidden) carSelect.value = '';
 });
 
-// Trigger on load if user is pre-selected
-if (userSelect.value) userSelect.dispatchEvent(new Event('change'));
+// ── Multi-select filter dropdowns ─────────────────────────────────────────────
+function updateLabel(selector, labelId, singularName) {
+    const checked = document.querySelectorAll(selector + ':checked');
+    const label = document.getElementById(labelId);
+    if (checked.length === 0) {
+        label.textContent = 'All';
+    } else if (checked.length === 1) {
+        label.textContent = checked[0].closest('.form-check').querySelector('label').textContent.trim();
+    } else {
+        label.textContent = checked.length + ' selected';
+    }
+}
+
+function filterCarsByUsers() {
+    const checkedUsers = Array.from(document.querySelectorAll('.user-check:checked')).map(c => c.value);
+    document.querySelectorAll('.car-check-row').forEach(row => {
+        if (checkedUsers.length === 0) {
+            row.hidden = false;
+            return;
+        }
+        const owner  = row.dataset.owner;
+        const shared = row.dataset.shared ? row.dataset.shared.split(',') : [];
+        const visible = checkedUsers.some(uid => uid === owner || shared.includes(uid));
+        row.hidden = !visible;
+        if (!visible) row.querySelector('.car-check').checked = false;
+    });
+    updateLabel('.car-check', 'carLabel', 'car');
+}
+
+document.querySelectorAll('.user-check').forEach(cb => {
+    cb.addEventListener('change', () => {
+        updateLabel('.user-check', 'userLabel', 'user');
+        filterCarsByUsers();
+    });
+});
+
+document.querySelectorAll('.car-check').forEach(cb => {
+    cb.addEventListener('change', () => updateLabel('.car-check', 'carLabel', 'car'));
+});
+
+// Init labels and car filter on page load
+updateLabel('.user-check', 'userLabel', 'user');
+filterCarsByUsers();
+updateLabel('.car-check', 'carLabel', 'car');
 </script>
 {% endblock %}

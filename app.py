@@ -801,37 +801,107 @@ def admin_overview():
     users = User.query.filter_by(is_admin=False).order_by(User.username).all()
     cars  = Car.query.order_by(Car.name).all()
 
-    sel_user_id = request.args.get('user_id', type=int)
-    sel_car_id  = request.args.get('car_id',  type=int)
+    sel_user_ids = request.args.getlist('user_id', type=int)
+    sel_car_ids  = request.args.getlist('car_id',  type=int)
 
     q = Expense.query
-    if sel_user_id:
-        q = q.filter(Expense.user_id == sel_user_id)
-    if sel_car_id:
-        q = q.filter(Expense.car_id == sel_car_id)
+    if sel_user_ids:
+        q = q.filter(Expense.user_id.in_(sel_user_ids))
+    if sel_car_ids:
+        q = q.filter(Expense.car_id.in_(sel_car_ids))
     expenses = q.order_by(Expense.date.desc(), Expense.created_at.desc()).all()
 
     type_totals: dict = defaultdict(float)
     for e in expenses:
         type_totals[e.expense_type] += e.amount_czk
 
-    # For car dropdown: if a user is selected show only their cars
-    if sel_user_id:
-        user_car_ids = (
-            [c.id for c in Car.query.filter_by(owner_id=sel_user_id).all()] +
-            [s.car_id for s in CarShare.query.filter_by(user_id=sel_user_id).all()]
-        )
-        filtered_cars = [c for c in cars if c.id in user_car_ids]
-    else:
-        filtered_cars = cars
+    # Build per-expense detail dict for the modal (serialised to JSON in template)
+    expense_details = {}
+    for e in expenses:
+        d = {
+            'date': e.date.strftime('%d.%m.%Y'),
+            'car': e.car.name,
+            'user': e.user.username,
+            'type': e.expense_type,
+            'type_label': TYPE_LABELS.get(e.expense_type, e.expense_type),
+            'type_icon': TYPE_ICONS.get(e.expense_type, ''),
+            'type_color': TYPE_COLORS.get(e.expense_type, '#6c757d'),
+            'amount_czk': format_czk(e.amount_czk),
+            'orig': f'{e.amount:,.2f} {e.currency}' if e.currency != 'CZK' else '',
+            'notes': e.notes or '',
+            'time': '',
+            'fields': [],
+        }
+        if e.expense_type == 'fuel' and e.fuel_detail:
+            fd = e.fuel_detail
+            if fd.transaction_time:
+                d['time'] = fd.transaction_time.strftime('%H:%M')
+            fields = []
+            if fd.liters:
+                fields.append(['Liters', f'{fd.liters:.2f} L'])
+            if fd.price_per_liter:
+                fields.append(['Price/liter', f'{fd.price_per_liter:.2f} Kč'])
+            if fd.odometer:
+                fields.append(['Odometer', f'{fd.odometer:,} km'])
+            if fd.station_location:
+                fields.append(['Station', fd.station_location])
+            d['fields'] = fields
+        elif e.expense_type == 'repair' and e.repair_detail:
+            if e.repair_detail.description:
+                d['fields'] = [['Description', e.repair_detail.description]]
+        elif e.expense_type == 'toll' and e.toll_detail:
+            fields = []
+            if e.toll_detail.route:
+                fields.append(['Route', e.toll_detail.route])
+            if e.toll_detail.toll_type:
+                fields.append(['Type', e.toll_detail.toll_type])
+            d['fields'] = fields
+        elif e.expense_type == 'insurance' and e.insurance_detail:
+            fields = []
+            if e.insurance_detail.insurance_type:
+                fields.append(['Type', e.insurance_detail.insurance_type])
+            if e.insurance_detail.provider:
+                fields.append(['Provider', e.insurance_detail.provider])
+            if e.insurance_detail.expiration_date:
+                fields.append(['Expires', e.insurance_detail.expiration_date.strftime('%d.%m.%Y')])
+            d['fields'] = fields
+        elif e.expense_type == 'gadget' and e.gadget_detail:
+            if e.gadget_detail.gadget_type:
+                d['fields'] = [['Item', e.gadget_detail.gadget_type]]
+        expense_details[e.id] = d
 
     return render_template('admin/overview.html',
         users=users,
-        cars=filtered_cars,
-        all_cars=cars,
+        cars=cars,
         expenses=expenses,
-        sel_user_id=sel_user_id,
-        sel_car_id=sel_car_id,
+        sel_user_ids=sel_user_ids,
+        sel_car_ids=sel_car_ids,
+        total_czk=sum(e.amount_czk for e in expenses),
+        type_totals=dict(type_totals),
+        expense_details=expense_details,
+    )
+
+
+@app.route('/admin/users/<int:user_id>')
+@admin_required
+def admin_user_detail(user_id):
+    from collections import defaultdict
+    user = User.query.get_or_404(user_id)
+    if user.is_admin:
+        abort(404)
+    owned_cars = Car.query.filter_by(owner_id=user_id).all()
+    shared_car_ids = [s.car_id for s in CarShare.query.filter_by(user_id=user_id).all()]
+    shared_cars = Car.query.filter(Car.id.in_(shared_car_ids)).all() if shared_car_ids else []
+    expenses = (Expense.query.filter_by(user_id=user_id)
+                .order_by(Expense.date.desc(), Expense.created_at.desc()).all())
+    type_totals: dict = defaultdict(float)
+    for e in expenses:
+        type_totals[e.expense_type] += e.amount_czk
+    return render_template('admin/user_detail.html',
+        profile=user,
+        owned_cars=owned_cars,
+        shared_cars=shared_cars,
+        expenses=expenses,
         total_czk=sum(e.amount_czk for e in expenses),
         type_totals=dict(type_totals),
     )
