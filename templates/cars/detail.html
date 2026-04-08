@@ -55,8 +55,8 @@
 
 {# ── Insurance warnings ── #}
 {% for e in insurance_warnings %}
-<div class="insurance-warning mb-2 d-flex align-items-center gap-2">
-    <i class="bi bi-exclamation-triangle-fill text-warning"></i>
+<div class="insurance-warning mb-2 d-flex align-items-center gap-2 flex-wrap">
+    <i class="bi bi-exclamation-triangle-fill text-warning flex-shrink-0"></i>
     <span>
         {% if e.insurance_detail.is_expired %}
         <strong>Expired:</strong>
@@ -67,16 +67,29 @@
         {% if e.insurance_detail.provider %}({{ e.insurance_detail.provider }}){% endif %}
         — {{ e.insurance_detail.expiration_date.strftime('%d.%m.%Y') }}
     </span>
-    <a href="{{ url_for('expense_edit', expense_id=e.id) }}" class="ms-auto btn btn-sm btn-warning rounded-3 py-0">
-        Update
-    </a>
+    <div class="ms-auto d-flex gap-1 flex-shrink-0">
+        <a href="{{ url_for('expense_new', car_id=car.id, type='insurance', renewing=e.id,
+                            pf_insurance_type=e.insurance_detail.insurance_type or '',
+                            pf_provider=e.insurance_detail.provider or '') }}"
+           class="btn btn-sm btn-warning rounded-3 py-0">Renew</a>
+        <form method="POST" action="{{ url_for('dismiss_warning', expense_id=e.id) }}" style="display:inline">
+            <button class="btn btn-sm btn-outline-secondary rounded-3 py-0" title="Dismiss for this session">
+                <i class="bi bi-eye-slash"></i>
+            </button>
+        </form>
+        <form method="POST" action="{{ url_for('dismiss_warning_permanent', expense_id=e.id) }}" style="display:inline">
+            <button class="btn btn-sm btn-outline-danger rounded-3 py-0" title="Dismiss forever">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </form>
+    </div>
 </div>
 {% endfor %}
 
 {# ── Toll expiry warnings ── #}
 {% for e in toll_warnings %}
-<div class="insurance-warning mb-2 d-flex align-items-center gap-2">
-    <i class="bi bi-exclamation-triangle-fill text-warning"></i>
+<div class="insurance-warning mb-2 d-flex align-items-center gap-2 flex-wrap">
+    <i class="bi bi-exclamation-triangle-fill text-warning flex-shrink-0"></i>
     <span>
         {% if e.toll_detail.is_expired %}
         <strong>Expired:</strong>
@@ -87,16 +100,29 @@
         {% if e.toll_detail.route %}({{ e.toll_detail.route }}){% endif %}
         — {{ e.toll_detail.expiration_date.strftime('%d.%m.%Y') }}
     </span>
-    <a href="{{ url_for('expense_edit', expense_id=e.id) }}" class="ms-auto btn btn-sm btn-warning rounded-3 py-0">
-        Update
-    </a>
+    <div class="ms-auto d-flex gap-1 flex-shrink-0">
+        <a href="{{ url_for('expense_new', car_id=car.id, type='toll', renewing=e.id,
+                            pf_toll_type=e.toll_detail.toll_type or '',
+                            pf_route=e.toll_detail.route or '') }}"
+           class="btn btn-sm btn-warning rounded-3 py-0">Renew</a>
+        <form method="POST" action="{{ url_for('dismiss_warning', expense_id=e.id) }}" style="display:inline">
+            <button class="btn btn-sm btn-outline-secondary rounded-3 py-0" title="Dismiss for this session">
+                <i class="bi bi-eye-slash"></i>
+            </button>
+        </form>
+        <form method="POST" action="{{ url_for('dismiss_warning_permanent', expense_id=e.id) }}" style="display:inline">
+            <button class="btn btn-sm btn-outline-danger rounded-3 py-0" title="Dismiss forever">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </form>
+    </div>
 </div>
 {% endfor %}
 
 {# ── Inspection expiry warnings ── #}
 {% for e in inspection_warnings %}
-<div class="insurance-warning mb-2 d-flex align-items-center gap-2">
-    <i class="bi bi-exclamation-triangle-fill text-warning"></i>
+<div class="insurance-warning mb-2 d-flex align-items-center gap-2 flex-wrap">
+    <i class="bi bi-exclamation-triangle-fill text-warning flex-shrink-0"></i>
     <span>
         {% if e.inspection_detail.is_expired %}
         <strong>Expired:</strong>
@@ -107,9 +133,22 @@
         {% if e.inspection_detail.workshop %}({{ e.inspection_detail.workshop }}){% endif %}
         — {{ e.inspection_detail.expiration_date.strftime('%d.%m.%Y') }}
     </span>
-    <a href="{{ url_for('expense_edit', expense_id=e.id) }}" class="ms-auto btn btn-sm btn-warning rounded-3 py-0">
-        Update
-    </a>
+    <div class="ms-auto d-flex gap-1 flex-shrink-0">
+        <a href="{{ url_for('expense_new', car_id=car.id, type='inspection', renewing=e.id,
+                            pf_workshop=e.inspection_detail.workshop or '',
+                            pf_inspection_odometer=e.inspection_detail.odometer or '') }}"
+           class="btn btn-sm btn-warning rounded-3 py-0">Renew</a>
+        <form method="POST" action="{{ url_for('dismiss_warning', expense_id=e.id) }}" style="display:inline">
+            <button class="btn btn-sm btn-outline-secondary rounded-3 py-0" title="Dismiss for this session">
+                <i class="bi bi-eye-slash"></i>
+            </button>
+        </form>
+        <form method="POST" action="{{ url_for('dismiss_warning_permanent', expense_id=e.id) }}" style="display:inline">
+            <button class="btn btn-sm btn-outline-danger rounded-3 py-0" title="Dismiss forever">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </form>
+    </div>
 </div>
 {% endfor %}
 

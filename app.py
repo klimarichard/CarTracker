@@ -157,6 +157,14 @@ class UserCarHidden(db.Model):
     __table_args__ = (db.UniqueConstraint('car_id', 'user_id'),)
 
 
+class DismissedWarning(db.Model):
+    __tablename__ = 'dismissed_warnings'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    expense_id = db.Column(db.Integer, db.ForeignKey('expenses.id', ondelete='CASCADE'), nullable=False)
+    __table_args__ = (db.UniqueConstraint('user_id', 'expense_id'),)
+
+
 EXPENSE_TYPES = ['fuel', 'repair', 'toll', 'insurance', 'gadget', 'inspection']
 TYPE_LABELS = {
     'fuel': 'Fuel', 'repair': 'Repair', 'toll': 'Toll',
@@ -992,6 +1000,18 @@ def car_detail(car_id):
     ]
     inspection_warnings = _filter_superseded_inspections(raw_inspection_warnings, expenses)
 
+    # Filter out warnings the user has dismissed (session or permanently)
+    from flask import session as flask_session
+    session_dismissed = set(flask_session.get('dismissed_warnings', []))
+    db_dismissed = {
+        d.expense_id for d in
+        DismissedWarning.query.filter_by(user_id=current_user.id).all()
+    }
+    all_dismissed = session_dismissed | db_dismissed
+    toll_warnings = [e for e in toll_warnings if e.id not in all_dismissed]
+    insurance_warnings = [e for e in insurance_warnings if e.id not in all_dismissed]
+    inspection_warnings = [e for e in inspection_warnings if e.id not in all_dismissed]
+
     return render_template('cars/detail.html',
         car=car,
         expenses=expenses,
@@ -1288,22 +1308,36 @@ def expense_new(car_id):
     if expense_type not in EXPENSE_TYPES:
         expense_type = 'fuel'
 
+    # Prefill values passed from renewal flow (pf_* query params)
+    prefill = {k[3:]: v for k, v in request.args.items() if k.startswith('pf_')}
+
+    # Optional reference expense shown as context when renewing
+    renewing_id = request.args.get('renewing', type=int)
+    renewing_expense = None
+    if renewing_id:
+        renewing_expense = Expense.query.get(renewing_id)
+        if renewing_expense and not renewing_expense.car.is_accessible_by(current_user):
+            renewing_expense = None
+
     if request.method == 'POST':
         expense_type = request.form.get('expense_type', 'fuel')
         if expense_type not in EXPENSE_TYPES:
             expense_type = 'fuel'
-        data, error = _parse_expense_form(request.form)
-        if error:
-            flash(error, 'danger')
+        if expense_type == 'toll' and not request.form.get('toll_type', '').strip():
+            flash('Please select a Toll Type.', 'danger')
         else:
-            expense = Expense(car_id=car_id, user_id=current_user.id,
-                              expense_type=expense_type, **data)
-            db.session.add(expense)
-            db.session.flush()
-            _apply_type_detail(expense, request.form)
-            db.session.commit()
-            flash('Expense added.', 'success')
-            return redirect(url_for('car_detail', car_id=car_id))
+            data, error = _parse_expense_form(request.form)
+            if error:
+                flash(error, 'danger')
+            else:
+                expense = Expense(car_id=car_id, user_id=current_user.id,
+                                  expense_type=expense_type, **data)
+                db.session.add(expense)
+                db.session.flush()
+                _apply_type_detail(expense, request.form)
+                db.session.commit()
+                flash('Expense added.', 'success')
+                return redirect(url_for('car_detail', car_id=car_id))
 
     past_stations = _get_past_stations(current_user)
     return render_template('expenses/form.html',
@@ -1311,6 +1345,8 @@ def expense_new(car_id):
         currencies=SUPPORTED_CURRENCIES, toll_types=TOLL_TYPES,
         insurance_types=INSURANCE_TYPES, today=date.today().isoformat(),
         past_stations=past_stations,
+        prefill=prefill,
+        renewing_expense=renewing_expense,
     )
 
 
@@ -1323,19 +1359,22 @@ def expense_edit(expense_id):
     car = expense.car
 
     if request.method == 'POST':
-        data, error = _parse_expense_form(request.form)
-        if error:
-            flash(error, 'danger')
+        if expense.expense_type == 'toll' and not request.form.get('toll_type', '').strip():
+            flash('Please select a Toll Type.', 'danger')
         else:
-            expense.amount = data['amount']
-            expense.currency = data['currency']
-            expense.amount_czk = data['amount_czk']
-            expense.date = data['date']
-            expense.notes = data['notes']
-            _apply_type_detail(expense, request.form)
-            db.session.commit()
-            flash('Expense updated.', 'success')
-            return redirect(url_for('car_detail', car_id=car.id))
+            data, error = _parse_expense_form(request.form)
+            if error:
+                flash(error, 'danger')
+            else:
+                expense.amount = data['amount']
+                expense.currency = data['currency']
+                expense.amount_czk = data['amount_czk']
+                expense.date = data['date']
+                expense.notes = data['notes']
+                _apply_type_detail(expense, request.form)
+                db.session.commit()
+                flash('Expense updated.', 'success')
+                return redirect(url_for('car_detail', car_id=car.id))
 
     past_stations = _get_past_stations(current_user)
     return render_template('expenses/form.html',
@@ -1343,6 +1382,8 @@ def expense_edit(expense_id):
         currencies=SUPPORTED_CURRENCIES, toll_types=TOLL_TYPES,
         insurance_types=INSURANCE_TYPES, today=date.today().isoformat(),
         past_stations=past_stations,
+        prefill={},
+        renewing_expense=None,
     )
 
 
@@ -1357,6 +1398,35 @@ def expense_delete(expense_id):
     db.session.commit()
     flash('Expense deleted.', 'success')
     return redirect(url_for('car_detail', car_id=car_id))
+
+
+@app.route('/warnings/<int:expense_id>/dismiss', methods=['POST'])
+@login_required
+def dismiss_warning(expense_id):
+    """Dismiss a warning banner for this browser session."""
+    from flask import session as flask_session
+    dismissed = flask_session.get('dismissed_warnings', [])
+    if expense_id not in dismissed:
+        dismissed.append(expense_id)
+    flask_session['dismissed_warnings'] = dismissed
+    flask_session.modified = True
+    return redirect(request.referrer or url_for('dashboard'))
+
+
+@app.route('/warnings/<int:expense_id>/dismiss-permanent', methods=['POST'])
+@login_required
+def dismiss_warning_permanent(expense_id):
+    """Permanently dismiss a warning banner for this user."""
+    expense = Expense.query.get_or_404(expense_id)
+    if not expense.car.is_accessible_by(current_user):
+        abort(403)
+    existing = DismissedWarning.query.filter_by(
+        user_id=current_user.id, expense_id=expense_id
+    ).first()
+    if not existing:
+        db.session.add(DismissedWarning(user_id=current_user.id, expense_id=expense_id))
+        db.session.commit()
+    return redirect(request.referrer or url_for('dashboard'))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
