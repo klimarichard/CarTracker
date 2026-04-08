@@ -614,11 +614,14 @@ def expense_list():
     from collections import defaultdict
     cars = current_user.get_accessible_cars()
     sel_car_ids = request.args.getlist('car_id', type=int)
+    sel_types   = [t for t in request.args.getlist('type') if t in EXPENSE_TYPES]
 
     car_ids = [c.id for c in cars]
     q = Expense.query.filter(Expense.car_id.in_(car_ids)) if car_ids else Expense.query.filter(False)
     if sel_car_ids:
         q = q.filter(Expense.car_id.in_(sel_car_ids))
+    if sel_types:
+        q = q.filter(Expense.expense_type.in_(sel_types))
     expenses = q.order_by(Expense.date.desc(), Expense.created_at.desc()).all()
 
     type_totals: dict = defaultdict(float)
@@ -629,6 +632,7 @@ def expense_list():
         cars=cars,
         expenses=expenses,
         sel_car_ids=sel_car_ids,
+        sel_types=sel_types,
         total_czk=sum(e.amount_czk for e in expenses),
         type_totals=dict(type_totals),
     )
@@ -641,10 +645,13 @@ def expense_export():
         return redirect(url_for('admin_overview_export'))
     cars = current_user.get_accessible_cars()
     sel_car_ids = request.args.getlist('car_id', type=int)
+    sel_types   = [t for t in request.args.getlist('type') if t in EXPENSE_TYPES]
     car_ids = [c.id for c in cars]
     q = Expense.query.filter(Expense.car_id.in_(car_ids)) if car_ids else Expense.query.filter(False)
     if sel_car_ids:
         q = q.filter(Expense.car_id.in_(sel_car_ids))
+    if sel_types:
+        q = q.filter(Expense.expense_type.in_(sel_types))
     expenses = q.order_by(Expense.date.desc(), Expense.created_at.desc()).all()
     return _export_xlsx(expenses, include_user=False, filename='my_expenses')
 
@@ -1083,12 +1090,15 @@ def admin_overview():
 
     sel_user_ids = request.args.getlist('user_id', type=int)
     sel_car_ids  = request.args.getlist('car_id',  type=int)
+    sel_types    = [t for t in request.args.getlist('type') if t in EXPENSE_TYPES]
 
     q = Expense.query
     if sel_user_ids:
         q = q.filter(Expense.user_id.in_(sel_user_ids))
     if sel_car_ids:
         q = q.filter(Expense.car_id.in_(sel_car_ids))
+    if sel_types:
+        q = q.filter(Expense.expense_type.in_(sel_types))
     expenses = q.order_by(Expense.date.desc(), Expense.created_at.desc()).all()
 
     type_totals: dict = defaultdict(float)
@@ -1156,6 +1166,7 @@ def admin_overview():
         expenses=expenses,
         sel_user_ids=sel_user_ids,
         sel_car_ids=sel_car_ids,
+        sel_types=sel_types,
         total_czk=sum(e.amount_czk for e in expenses),
         type_totals=dict(type_totals),
         expense_details=expense_details,
@@ -1167,11 +1178,14 @@ def admin_overview():
 def admin_overview_export():
     sel_user_ids = request.args.getlist('user_id', type=int)
     sel_car_ids  = request.args.getlist('car_id',  type=int)
+    sel_types    = [t for t in request.args.getlist('type') if t in EXPENSE_TYPES]
     q = Expense.query
     if sel_user_ids:
         q = q.filter(Expense.user_id.in_(sel_user_ids))
     if sel_car_ids:
         q = q.filter(Expense.car_id.in_(sel_car_ids))
+    if sel_types:
+        q = q.filter(Expense.expense_type.in_(sel_types))
     expenses = q.order_by(Expense.date.desc(), Expense.created_at.desc()).all()
     return _export_xlsx(expenses, include_user=True, filename='expenses_export')
 
