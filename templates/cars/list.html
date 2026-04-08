@@ -74,12 +74,46 @@
                         <i class="bi bi-share"></i>
                     </a>
                     {% endif %}
-                    <form method="POST" action="{{ url_for('car_hide', car_id=car.id) }}"
-                          class="d-inline">
-                        <button type="submit" class="btn btn-sm btn-outline-secondary rounded-3"
-                                title="Mark as not used">
-                            <i class="bi bi-eye-slash"></i>
-                        </button>
+                    <button type="button"
+                            class="btn btn-sm btn-outline-secondary rounded-3"
+                            data-bs-toggle="modal"
+                            data-bs-target="#hideModal{{ car.id }}"
+                            title="Mark as not used">
+                        <i class="bi bi-eye-slash"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# Hide confirmation modal #}
+    <div class="modal fade" id="hideModal{{ car.id }}" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content rounded-4 border-0 shadow">
+                <div class="modal-header border-0 pb-1">
+                    <h6 class="modal-title fw-bold">Mark as not used</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body pt-1 pb-2">
+                    <p class="small mb-2">Hide <strong>{{ car.name }}</strong> from your dashboard?
+                    You can restore it any time from <em>My Cars</em>.</p>
+                    <form method="POST" action="{{ url_for('car_hide', car_id=car.id) }}">
+                        {% if car.owner_id == current_user.id and car.shares %}
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox"
+                                   name="hide_globally" id="hideGlobal{{ car.id }}">
+                            <label class="form-check-label small" for="hideGlobal{{ car.id }}">
+                                Also hide from all shared users
+                            </label>
+                        </div>
+                        {% endif %}
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-warning btn-sm rounded-3 flex-grow-1">
+                                <i class="bi bi-eye-slash me-1"></i>Hide
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm rounded-3"
+                                    data-bs-dismiss="modal">Cancel</button>
+                        </div>
                     </form>
                 </div>
             </div>
