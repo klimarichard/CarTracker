@@ -22,7 +22,7 @@ jobs:
           echo "STAMP=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
 
       - name: Upload the dump as an artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cartracker-backup-${{ env.STAMP }}
           path: backup.dump
