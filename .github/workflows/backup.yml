@@ -1,0 +1,29 @@
+name: Daily database backup
+
+# Dumps the Railway Postgres database once a day and keeps each dump
+# as a downloadable artifact for 90 days.
+on:
+  schedule:
+    - cron: '0 3 * * *'      # every day at 03:00 UTC
+  workflow_dispatch:          # also allow manual runs from the Actions tab
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump the Railway database
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          # pg_dump runs inside a postgres:18 container so its version
+          # matches the Railway server (18.x); the dump lands in the workspace.
+          docker run --rm -e DATABASE_URL -v "$PWD":/backup postgres:18 \
+            sh -c 'pg_dump "$DATABASE_URL" --no-owner --no-acl --format=custom --file=/backup/backup.dump'
+          echo "STAMP=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
+
+      - name: Upload the dump as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cartracker-backup-${{ env.STAMP }}
+          path: backup.dump
+          retention-days: 90
