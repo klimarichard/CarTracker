@@ -211,4 +211,10 @@ Charts use Chart.js (CDN). Car detail page has three charts: stacked monthly bar
 
 ## Deployment
 
-Configured for Railway via `Procfile` and `railway.toml`. Set `SECRET_KEY` env var in Railway before deploying. The app uses SQLite — if migrating to PostgreSQL, set `DATABASE_URL` env var (Railway provides `postgres://` which is auto-rewritten to `postgresql://`).
+Configured for Railway via `Procfile` and `railway.toml`. Set `SECRET_KEY` env var in Railway before deploying. The deploy/start command runs `flask db upgrade` (apply pending migrations) then `gunicorn`. Locally the app defaults to SQLite (`sqlite:///carexpenses.db`); production sets `DATABASE_URL` to the Railway **PostgreSQL** instance (Railway provides `postgres://`, auto-rewritten to `postgresql://`).
+
+### Database backups
+
+Two GitHub Actions workflows dump the Railway Postgres DB with `pg_dump` (run in a `postgres:18` container so the client version matches the server) and keep the result as a 90-day downloadable artifact. Both read the `BACKUP_DATABASE_URL` repo secret:
+- `.github/workflows/backup.yml` — daily at 03:00 UTC, plus manual (`workflow_dispatch`).
+- `.github/workflows/predeploy-backup.yml` — on every push to `main` (the deploy branch) and manual, so a fresh snapshot is captured around each deploy, before its migrations run.

@@ -1,0 +1,40 @@
+name: Pre-deploy database backup
+
+# Snapshots the Railway Postgres database on every push to main (the branch
+# Railway deploys from) and on demand, so a fresh dump is always captured
+# around each deploy — before its migrations run. Kept as a downloadable
+# artifact, same format/mechanism as the daily backup.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One backup per commit; don't pile up overlapping runs for rapid pushes.
+concurrency:
+  group: predeploy-backup-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump the Railway database
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::BACKUP_DATABASE_URL secret is not set — cannot take a pre-deploy backup."
+            exit 1
+          fi
+          # pg_dump runs inside a postgres:18 container so its version
+          # matches the Railway server (18.x); the dump lands in the workspace.
+          docker run --rm -e DATABASE_URL -v "$PWD":/backup postgres:18 \
+            sh -c 'pg_dump "$DATABASE_URL" --no-owner --no-acl --format=custom --file=/backup/backup.dump'
+          echo "STAMP=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_ENV"
+
+      - name: Upload the dump as an artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: cartracker-predeploy-${{ env.STAMP }}-${{ github.sha }}
+          path: backup.dump
+          retention-days: 90
