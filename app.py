@@ -167,20 +167,22 @@ class DismissedWarning(db.Model):
     __table_args__ = (db.UniqueConstraint('user_id', 'expense_id'),)
 
 
-EXPENSE_TYPES = ['fuel', 'repair', 'toll', 'insurance', 'gadget', 'inspection']
+EXPENSE_TYPES = ['fuel', 'repair', 'toll', 'insurance', 'gadget', 'inspection', 'tire']
 TYPE_LABELS = {
     'fuel': 'Fuel', 'repair': 'Repair', 'toll': 'Toll',
     'insurance': 'Insurance', 'gadget': 'Gadget',
-    'inspection': 'Technical Inspection',
+    'inspection': 'Technical Inspection', 'tire': 'Tires',
 }
 TYPE_ICONS = {
     'fuel': 'bi-fuel-pump', 'repair': 'bi-wrench-adjustable',
     'toll': 'bi-signpost-2', 'insurance': 'bi-shield-check',
     'gadget': 'bi-phone', 'inspection': 'bi-clipboard2-check',
+    'tire': 'bi-disc',
 }
 TYPE_COLORS = {
     'fuel': '#0dcaf0', 'repair': '#dc3545', 'toll': '#ffc107',
     'insurance': '#198754', 'gadget': '#6f42c1', 'inspection': '#fd7e14',
+    'tire': '#20c997',
 }
 
 
@@ -203,6 +205,8 @@ class Expense(db.Model):
     insurance_detail = db.relationship('InsuranceDetail', backref='expense', uselist=False, cascade='all, delete-orphan')
     gadget_detail = db.relationship('GadgetDetail', backref='expense', uselist=False, cascade='all, delete-orphan')
     inspection_detail = db.relationship('InspectionDetail', backref='expense', uselist=False, cascade='all, delete-orphan')
+    tire_detail = db.relationship('TireDetail', backref='expense', uselist=False,
+                                  foreign_keys='TireDetail.expense_id', cascade='all, delete-orphan')
 
     def can_edit(self, user):
         return user.is_admin or self.user_id == user.id or self.car.owner_id == user.id
@@ -222,7 +226,8 @@ class Expense(db.Model):
     @property
     def detail(self):
         return (self.fuel_detail or self.repair_detail or self.toll_detail or
-                self.insurance_detail or self.gadget_detail or self.inspection_detail)
+                self.insurance_detail or self.gadget_detail or self.inspection_detail or
+                self.tire_detail)
 
 
 class FuelDetail(db.Model):
@@ -371,6 +376,136 @@ class InspectionDetail(db.Model):
         return bool(self.expiration_date and self.expiration_date < date.today())
 
 
+class TireDetail(db.Model):
+    __tablename__ = 'tire_details'
+    id = db.Column(db.Integer, primary_key=True)
+    expense_id = db.Column(db.Integer, db.ForeignKey('expenses.id'), nullable=False)
+    action = db.Column(db.String(10))            # 'buy' or 'change'
+    tire_type = db.Column(db.String(20))         # Summer / Winter / All-season
+    brand = db.Column(db.String(100))
+    size = db.Column(db.String(50))
+    quantity = db.Column(db.Integer)
+    odometer = db.Column(db.Integer)             # mount odometer (for a 'change')
+    tire_set_id = db.Column(db.Integer, db.ForeignKey('tire_sets.id'))
+
+    tire_set = db.relationship('TireSet', foreign_keys=[tire_set_id])
+
+    @property
+    def summary(self):
+        s = self.tire_set
+        if s:
+            label = ' '.join(p for p in [s.brand, s.size] if p) or s.tire_type or 'tire set'
+        else:
+            label = ' '.join(p for p in [self.brand, self.size] if p) or (self.tire_type or 'tires')
+        verb = {'buy': 'Bought', 'change': 'Changed to'}.get(self.action, '')
+        parts = [f'{verb} {label}'.strip()]
+        if self.odometer:
+            parts.append(f'@ {self.odometer:,} km')
+        return ' · '.join(parts)
+
+
+class TireSet(db.Model):
+    """A physical set of tires owned for a car. Created by a 'buy' tire expense or
+    added manually; mounted/dismounted over time via 'change' tire expenses."""
+    __tablename__ = 'tire_sets'
+    id = db.Column(db.Integer, primary_key=True)
+    car_id = db.Column(db.Integer, db.ForeignKey('cars.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    brand = db.Column(db.String(100))
+    size = db.Column(db.String(50))
+    tire_type = db.Column(db.String(20))
+    quantity = db.Column(db.Integer)
+    dot_code = db.Column(db.String(10))          # DOT week/year stamp, e.g. '3621'
+    purchase_date = db.Column(db.Date)
+    purchase_expense_id = db.Column(db.Integer, db.ForeignKey('expenses.id'))
+    # Mount state + accumulated mileage (derived by _recompute_tire_state)
+    mounted = db.Column(db.Boolean, default=False)
+    mounted_at_odometer = db.Column(db.Integer)
+    total_km = db.Column(db.Integer, default=0)
+    # Per-set alert thresholds
+    max_age_months = db.Column(db.Integer)
+    max_km = db.Column(db.Integer)
+    notify_alerts = db.Column(db.Boolean, default=False)
+    age_alert_sent = db.Column(db.Boolean, default=False)
+    km_alert_sent = db.Column(db.Boolean, default=False)
+    retired = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    car = db.relationship('Car', backref=db.backref('tire_sets', cascade='all, delete-orphan'))
+    user = db.relationship('User')
+    purchase_expense = db.relationship('Expense', foreign_keys=[purchase_expense_id])
+
+    def can_edit(self, user):
+        return user.is_admin or self.user_id == user.id or self.car.owner_id == user.id
+
+    @property
+    def display_name(self):
+        return ' '.join(p for p in [self.brand, self.size] if p) or self.tire_type or 'Tire set'
+
+    @property
+    def manufacture_date(self):
+        """Approximate manufacture date from a 4-digit DOT week/year code (WWYY)."""
+        digits = ''.join(ch for ch in (self.dot_code or '') if ch.isdigit())
+        if len(digits) < 4:
+            return None
+        wwyy = digits[-4:]
+        week, year = int(wwyy[:2]), 2000 + int(wwyy[2:])
+        if not (1 <= week <= 53):
+            return None
+        try:
+            return date.fromisocalendar(year, week, 1)
+        except ValueError:
+            return None
+
+    @property
+    def age_days(self):
+        md = self.manufacture_date
+        return (date.today() - md).days if md else None
+
+    @property
+    def age_label(self):
+        days = self.age_days
+        if days is None:
+            return None
+        years, months = days // 365, (days % 365) // 30
+        if years and months:
+            return f'{years} yr {months} mo'
+        return f'{years} yr' if years else f'{months} mo'
+
+    @property
+    def km_driven(self):
+        """Completed mounted-period mileage plus a live estimate if currently mounted."""
+        total = self.total_km or 0
+        if self.mounted and self.mounted_at_odometer is not None:
+            latest = _car_latest_odometer(self.car)
+            if latest is not None and latest > self.mounted_at_odometer:
+                total += latest - self.mounted_at_odometer
+        return total
+
+    @property
+    def is_too_old(self):
+        if self.retired or not self.max_age_months:
+            return False
+        days = self.age_days
+        return days is not None and days > self.max_age_months * 30
+
+    @property
+    def is_over_km(self):
+        if self.retired or not self.max_km:
+            return False
+        return self.km_driven > self.max_km
+
+    @property
+    def has_alert(self):
+        return self.is_too_old or self.is_over_km
+
+    @property
+    def status_label(self):
+        if self.retired:
+            return 'Retired'
+        return 'Mounted' if self.mounted else 'In storage'
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -450,6 +585,87 @@ def _filter_superseded_inspections(warnings, all_expenses):
     return result
 
 
+def _car_latest_odometer(car):
+    """Highest odometer reading recorded across the car's fuel, inspection and tire entries."""
+    readings = []
+    for e in Expense.query.filter_by(car_id=car.id).all():
+        if e.fuel_detail and e.fuel_detail.odometer:
+            readings.append(e.fuel_detail.odometer)
+        if e.inspection_detail and e.inspection_detail.odometer:
+            readings.append(e.inspection_detail.odometer)
+        if e.tire_detail and e.tire_detail.odometer:
+            readings.append(e.tire_detail.odometer)
+    return max(readings) if readings else None
+
+
+def _recompute_tire_state(car):
+    """Rebuild mount status + accumulated mileage for a car's tire sets from its history.
+
+    Mounting is driven entirely by 'change' tire expenses (replayed in date order): each
+    change dismounts the currently-mounted set — accruing the distance driven onto its
+    total_km — and mounts the chosen set. 'buy' and manually-added sets start in storage.
+    Robust to edits, deletes and back-dated entries since it recomputes from scratch.
+    """
+    sets = TireSet.query.filter_by(car_id=car.id).all()
+    for s in sets:
+        s.mounted = False
+        s.mounted_at_odometer = None
+        s.total_km = 0
+    by_id = {s.id: s for s in sets}
+
+    # Query TireDetail directly (a freshly-created expense's tire_detail relationship
+    # may be a stale None in this session, since only the FK column was set).
+    changes = (db.session.query(TireDetail)
+               .join(Expense, TireDetail.expense_id == Expense.id)
+               .filter(Expense.car_id == car.id, Expense.expense_type == 'tire',
+                       TireDetail.action == 'change', TireDetail.tire_set_id.isnot(None))
+               .order_by(Expense.date.asc(), Expense.id.asc())
+               .all())
+
+    current = None  # currently mounted TireSet
+    for d in changes:
+        s = by_id.get(d.tire_set_id)
+        if s is None:
+            continue
+        odo = d.odometer
+        if current is not None and current.id == s.id:
+            continue  # changed to the already-mounted set: nothing to do
+        if current is not None:
+            if (current.mounted_at_odometer is not None and odo is not None
+                    and odo >= current.mounted_at_odometer):
+                current.total_km += odo - current.mounted_at_odometer
+            current.mounted = False
+            current.mounted_at_odometer = None
+        s.mounted = True
+        s.mounted_at_odometer = odo
+        current = s
+
+
+def _mountable_tire_sets(car):
+    """Non-retired tire sets for a car, offered in the 'change' dropdown."""
+    return (TireSet.query.filter_by(car_id=car.id, retired=False)
+            .order_by(TireSet.created_at.desc()).all())
+
+
+def _apply_tire_alert_settings(s, form):
+    """Read a tire set's alert thresholds from a form, resetting sent-flags on change."""
+    try:
+        new_age = int(form.get('tire_max_age_months') or 0) or None
+    except (ValueError, TypeError):
+        new_age = None
+    try:
+        new_km = int(form.get('tire_max_km') or 0) or None
+    except (ValueError, TypeError):
+        new_km = None
+    if new_age != s.max_age_months:
+        s.age_alert_sent = False
+    if new_km != s.max_km:
+        s.km_alert_sent = False
+    s.max_age_months = new_age
+    s.max_km = new_km
+    s.notify_alerts = bool(form.get('tire_notify_alerts'))
+
+
 def get_exchange_rate(from_currency: str, to_currency: str = 'CZK') -> float | None:
     if from_currency == to_currency:
         return 1.0
@@ -476,6 +692,8 @@ def get_exchange_rate(from_currency: str, to_currency: str = 'CZK') -> float | N
 SUPPORTED_CURRENCIES = ['CZK', 'EUR', 'USD', 'GBP', 'CHF', 'PLN', 'HUF', 'NOK', 'SEK', 'DKK']
 TOLL_TYPES = ['Highway vignette', 'Toll gate', 'Bridge toll', 'Tunnel toll', 'Parking', 'Other']
 INSURANCE_TYPES = ['Liability (Povinné ručení)', 'Comprehensive (Havarijní)', 'GAP Insurance', 'Other']
+TIRE_TYPES = ['Summer', 'Winter', 'All-season']
+TIRE_ACTIONS = ['buy', 'change']
 
 
 @app.template_filter('czk')
@@ -1014,9 +1232,20 @@ def car_detail(car_id):
     insurance_warnings = [e for e in insurance_warnings if e.id not in all_dismissed]
     inspection_warnings = [e for e in inspection_warnings if e.id not in all_dismissed]
 
+    # Tire sets (per-car inventory): active first (mounted on top), retired grouped below
+    all_tire_sets = TireSet.query.filter_by(car_id=car_id).order_by(TireSet.created_at.desc()).all()
+    active_tire_sets = sorted([s for s in all_tire_sets if not s.retired],
+                              key=lambda s: not s.mounted)
+    retired_tire_sets = [s for s in all_tire_sets if s.retired]
+    tire_alerts = [s for s in active_tire_sets if s.has_alert]
+
     return render_template('cars/detail.html',
         car=car,
         expenses=expenses,
+        active_tire_sets=active_tire_sets,
+        retired_tire_sets=retired_tire_sets,
+        tire_alerts=tire_alerts,
+        tire_types=TIRE_TYPES,
         is_owner=(current_user.is_admin or car.owner_id == current_user.id),
         is_admin_view=is_admin_view,
         total_spent=sum(e.amount_czk for e in expenses),
@@ -1298,6 +1527,48 @@ def _apply_type_detail(expense, form):
         if not expense.inspection_detail:
             db.session.add(d)
 
+    elif t == 'tire':
+        d = expense.tire_detail or TireDetail()
+        d.expense_id = expense.id
+        action = (form.get('tire_action') or 'buy').strip().lower()
+        d.action = action if action in TIRE_ACTIONS else 'buy'
+        try:
+            d.odometer = int(form.get('tire_odometer') or 0) or None
+        except (ValueError, TypeError):
+            d.odometer = None
+
+        if d.action == 'buy':
+            d.tire_type = form.get('tire_type', '').strip() or None
+            d.brand = form.get('tire_brand', '').strip() or None
+            d.size = form.get('tire_size', '').strip() or None
+            try:
+                d.quantity = int(form.get('tire_quantity') or 0) or None
+            except (ValueError, TypeError):
+                d.quantity = None
+            # Buy creates (or, on edit, updates) the tire set it represents — in storage.
+            s = TireSet.query.filter_by(purchase_expense_id=expense.id).first() if expense.id else None
+            if s is None:
+                s = TireSet(car_id=expense.car_id, user_id=expense.user_id,
+                            purchase_expense_id=expense.id)
+                db.session.add(s)
+            s.brand, s.size, s.tire_type, s.quantity = d.brand, d.size, d.tire_type, d.quantity
+            s.purchase_date = expense.date
+            s.dot_code = form.get('tire_dot', '').strip() or None
+            _apply_tire_alert_settings(s, form)
+            db.session.flush()
+            d.tire_set_id = s.id
+        else:  # change — mount an existing set
+            set_id = form.get('tire_set_id', type=int)
+            s = TireSet.query.filter_by(id=set_id, car_id=expense.car_id).first() if set_id else None
+            d.tire_set_id = s.id if s else None
+            if s:  # mirror descriptive fields for standalone display
+                d.tire_type, d.brand, d.size, d.quantity = s.tire_type, s.brand, s.size, s.quantity
+
+        if not expense.tire_detail:
+            db.session.add(d)
+        db.session.flush()
+        _recompute_tire_state(expense.car)
+
 
 @app.route('/cars/<int:car_id>/expenses/new', methods=['GET', 'POST'])
 @login_required
@@ -1347,6 +1618,7 @@ def expense_new(car_id):
         currencies=SUPPORTED_CURRENCIES, toll_types=TOLL_TYPES,
         insurance_types=INSURANCE_TYPES, today=date.today().isoformat(),
         past_stations=past_stations,
+        tire_types=TIRE_TYPES, tire_sets=_mountable_tire_sets(car),
         prefill=prefill,
         renewing_expense=renewing_expense,
     )
@@ -1384,6 +1656,7 @@ def expense_edit(expense_id):
         currencies=SUPPORTED_CURRENCIES, toll_types=TOLL_TYPES,
         insurance_types=INSURANCE_TYPES, today=date.today().isoformat(),
         past_stations=past_stations,
+        tire_types=TIRE_TYPES, tire_sets=_mountable_tire_sets(car),
         prefill={},
         renewing_expense=None,
     )
@@ -1395,11 +1668,92 @@ def expense_delete(expense_id):
     expense = Expense.query.get_or_404(expense_id)
     if not expense.can_edit(current_user):
         abort(403)
-    car_id = expense.car_id
+    car = expense.car
+    was_tire = expense.expense_type == 'tire'
+    # A 'buy' created a tire set — keep the set (and its mount history); just unlink it.
+    for s in TireSet.query.filter_by(purchase_expense_id=expense.id).all():
+        s.purchase_expense_id = None
     db.session.delete(expense)
+    db.session.flush()
+    if was_tire:
+        _recompute_tire_state(car)
     db.session.commit()
     flash('Expense deleted.', 'success')
-    return redirect(url_for('car_detail', car_id=car_id))
+    return redirect(url_for('car_detail', car_id=car.id))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tire sets (per-car inventory shown in the Tires section)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _read_tire_set_form(s, form):
+    s.brand = form.get('tire_brand', '').strip() or None
+    s.size = form.get('tire_size', '').strip() or None
+    s.tire_type = form.get('tire_type', '').strip() or None
+    try:
+        s.quantity = int(form.get('tire_quantity') or 0) or None
+    except (ValueError, TypeError):
+        s.quantity = None
+    s.dot_code = form.get('tire_dot', '').strip() or None
+    _apply_tire_alert_settings(s, form)
+
+
+@app.route('/cars/<int:car_id>/tires/new', methods=['POST'])
+@login_required
+def tire_set_new(car_id):
+    car = Car.query.get_or_404(car_id)
+    if not car.is_accessible_by(current_user):
+        abort(403)
+    s = TireSet(car_id=car.id, user_id=current_user.id)
+    _read_tire_set_form(s, request.form)
+    db.session.add(s)
+    db.session.commit()
+    flash('Tire set added.', 'success')
+    return redirect(url_for('car_detail', car_id=car.id) + '#tires')
+
+
+@app.route('/cars/<int:car_id>/tires/<int:set_id>/edit', methods=['POST'])
+@login_required
+def tire_set_edit(car_id, set_id):
+    s = TireSet.query.filter_by(id=set_id, car_id=car_id).first_or_404()
+    if not s.can_edit(current_user):
+        abort(403)
+    _read_tire_set_form(s, request.form)
+    db.session.commit()
+    flash('Tire set updated.', 'success')
+    return redirect(url_for('car_detail', car_id=car_id) + '#tires')
+
+
+@app.route('/cars/<int:car_id>/tires/<int:set_id>/retire', methods=['POST'])
+@login_required
+def tire_set_retire(car_id, set_id):
+    s = TireSet.query.filter_by(id=set_id, car_id=car_id).first_or_404()
+    if not s.can_edit(current_user):
+        abort(403)
+    s.retired = not s.retired
+    if s.retired:
+        s.age_alert_sent = s.km_alert_sent = False
+    db.session.commit()
+    flash('Tire set ' + ('retired.' if s.retired else 'reactivated.'), 'success')
+    return redirect(url_for('car_detail', car_id=car_id) + '#tires')
+
+
+@app.route('/cars/<int:car_id>/tires/<int:set_id>/delete', methods=['POST'])
+@login_required
+def tire_set_delete(car_id, set_id):
+    s = TireSet.query.filter_by(id=set_id, car_id=car_id).first_or_404()
+    if not s.can_edit(current_user):
+        abort(403)
+    car = s.car
+    # Keep the 'change' expenses, just drop their link to this set.
+    for d in TireDetail.query.filter_by(tire_set_id=s.id).all():
+        d.tire_set_id = None
+    db.session.delete(s)
+    db.session.flush()
+    _recompute_tire_state(car)
+    db.session.commit()
+    flash('Tire set deleted.', 'success')
+    return redirect(url_for('car_detail', car_id=car_id) + '#tires')
 
 
 @app.route('/warnings/<int:expense_id>/dismiss', methods=['POST'])
@@ -1520,6 +1874,19 @@ def admin_overview():
                 fields.append(['Odometer', f'{e.inspection_detail.odometer:,} km'])
             if e.inspection_detail.expiration_date:
                 fields.append(['Expires', e.inspection_detail.expiration_date.strftime('%d.%m.%Y')])
+            d['fields'] = fields
+        elif e.expense_type == 'tire' and e.tire_detail:
+            td = e.tire_detail
+            fields = [['Action', 'Buy' if td.action == 'buy' else 'Change']]
+            if td.tire_type:
+                fields.append(['Type', td.tire_type])
+            name = ' '.join(p for p in [td.brand, td.size] if p)
+            if name:
+                fields.append(['Tires', name])
+            if td.quantity:
+                fields.append(['Quantity', str(td.quantity)])
+            if td.odometer:
+                fields.append(['Odometer', f'{td.odometer:,} km'])
             d['fields'] = fields
         expense_details[e.id] = d
 
@@ -1775,6 +2142,26 @@ def _send_notification_email(user, expense_type, car_name, expense_date, expiry_
         app.logger.warning(f'Failed to send expiry notification to {user.email}: {e}')
 
 
+def _send_tire_alert_email(user, tire_set, kind):
+    try:
+        if kind == 'age':
+            reason = f'are now {tire_set.age_label} old (your limit: {tire_set.max_age_months} months)'
+        else:
+            reason = f'have {tire_set.km_driven:,} km on them (your limit: {tire_set.max_km:,} km)'
+        msg = Message(
+            subject=f'Tire alert — {tire_set.display_name} on {tire_set.car.display_name}',
+            recipients=[user.email],
+            body=(
+                f'Hello {user.username},\n\n'
+                f'Your tire set "{tire_set.display_name}" on {tire_set.car.display_name} {reason}.\n\n'
+                f'Log in to your Car Expenses app to review or replace them.\n'
+            ),
+        )
+        mail.send(msg)
+    except Exception as e:
+        app.logger.warning(f'Failed to send tire alert to {user.email}: {e}')
+
+
 def send_expiry_notifications():
     from datetime import timedelta
     with app.app_context():
@@ -1814,6 +2201,16 @@ def send_expiry_notifications():
                     d.expense.date, d.expiration_date, d.notify_days_before,
                 )
                 d.notification_sent = True
+
+        # Tire age / mileage alerts (threshold-based, opt-in per set)
+        tire_sets = TireSet.query.filter_by(notify_alerts=True, retired=False).all()
+        for s in tire_sets:
+            if s.is_too_old and not s.age_alert_sent:
+                _send_tire_alert_email(s.user, s, 'age')
+                s.age_alert_sent = True
+            if s.is_over_km and not s.km_alert_sent:
+                _send_tire_alert_email(s.user, s, 'km')
+                s.km_alert_sent = True
 
         db.session.commit()
 

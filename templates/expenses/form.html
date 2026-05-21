@@ -46,6 +46,7 @@
                                 ('insurance',   'bi-shield-check',       'Insurance'),
                                 ('gadget',      'bi-phone',              'Gadget'),
                                 ('inspection',  'bi-clipboard2-check',   'Inspection'),
+                                ('tire',        'bi-disc',               'Tires'),
                             ] %}
                             {% for t, icon, label in types_meta %}
                             <div class="col-6 col-sm-4 col-md">
@@ -314,6 +315,130 @@
                         </div>
                     </div>
 
+                    {# ── Tire fields ── #}
+                    {% set tset = expense.tire_detail.tire_set if expense and expense.tire_detail else None %}
+                    <div id="fields-tire" class="type-fields" style="display:none">
+                        <div class="mb-3">
+                            <label class="form-label fw-medium small">Action <span class="text-danger">*</span></label>
+                            <select name="tire_action" id="tireActionSelect" class="form-select"
+                                    style="max-width:260px" onchange="switchTireAction(this.value)">
+                                <option value="buy"
+                                    {% if expense and expense.tire_detail and expense.tire_detail.action == 'change' %}{% else %}selected{% endif %}>
+                                    Buy new tires
+                                </option>
+                                <option value="change"
+                                    {% if expense and expense.tire_detail and expense.tire_detail.action == 'change' %}selected{% endif %}>
+                                    Change / swap tires
+                                </option>
+                            </select>
+                        </div>
+
+                        {# Buy — creates a tire set (kept in storage until mounted via Change) #}
+                        <div id="tire-buy-fields">
+                            <div class="row g-3 mb-3">
+                                <div class="col-sm-4">
+                                    <label class="form-label fw-medium small">Type</label>
+                                    <select name="tire_type" class="form-select">
+                                        <option value="">— Select —</option>
+                                        {% for tt in tire_types %}
+                                        <option value="{{ tt }}"
+                                            {% if expense and expense.tire_detail and expense.tire_detail.tire_type == tt %}selected{% endif %}>{{ tt }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-sm-5">
+                                    <label class="form-label fw-medium small">Brand / Model</label>
+                                    <input type="text" name="tire_brand" class="form-control" placeholder="e.g. Nokian Hakkapeliitta"
+                                           value="{{ expense.tire_detail.brand if expense and expense.tire_detail and expense.tire_detail.brand else '' }}">
+                                </div>
+                                <div class="col-sm-3">
+                                    <label class="form-label fw-medium small">Size</label>
+                                    <input type="text" name="tire_size" class="form-control" placeholder="205/55 R16"
+                                           value="{{ expense.tire_detail.size if expense and expense.tire_detail and expense.tire_detail.size else '' }}">
+                                </div>
+                            </div>
+                            <div class="row g-3 mb-3">
+                                <div class="col-sm-3">
+                                    <label class="form-label fw-medium small">Quantity</label>
+                                    <input type="number" name="tire_quantity" class="form-control" min="1" max="12" placeholder="4"
+                                           value="{{ expense.tire_detail.quantity if expense and expense.tire_detail and expense.tire_detail.quantity else '' }}">
+                                </div>
+                                <div class="col-sm-4">
+                                    <label class="form-label fw-medium small">Odometer <span class="text-muted fw-normal">(optional)</span></label>
+                                    <div class="input-group">
+                                        <input type="number" name="tire_odometer" class="form-control" min="0" placeholder="km"
+                                               value="{{ expense.tire_detail.odometer if expense and expense.tire_detail and expense.tire_detail.action == 'buy' and expense.tire_detail.odometer else '' }}">
+                                        <span class="input-group-text">km</span>
+                                    </div>
+                                </div>
+                                <div class="col-sm-5">
+                                    <label class="form-label fw-medium small">DOT code <span class="text-muted fw-normal">(week/year)</span></label>
+                                    <input type="text" name="tire_dot" class="form-control" maxlength="10" placeholder="e.g. 3621 = week 36 / 2021"
+                                           value="{{ tset.dot_code if tset and tset.dot_code else '' }}">
+                                </div>
+                            </div>
+                            <div class="row g-3 mb-2">
+                                <div class="col-sm-4">
+                                    <label class="form-label fw-medium small">Alert if older than <span class="text-muted fw-normal">(months)</span></label>
+                                    <input type="number" name="tire_max_age_months" class="form-control" min="1" placeholder="e.g. 72"
+                                           value="{{ tset.max_age_months if tset and tset.max_age_months else '' }}">
+                                </div>
+                                <div class="col-sm-4">
+                                    <label class="form-label fw-medium small">Alert if over <span class="text-muted fw-normal">(km)</span></label>
+                                    <input type="number" name="tire_max_km" class="form-control" min="1" placeholder="e.g. 40000"
+                                           value="{{ tset.max_km if tset and tset.max_km else '' }}">
+                                </div>
+                                <div class="col-sm-4 d-flex align-items-end">
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" name="tire_notify_alerts" id="tireNotifyCheck"
+                                               {% if tset and tset.notify_alerts %}checked{% endif %}>
+                                        <label class="form-check-label small" for="tireNotifyCheck">Email me these alerts</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <p class="text-muted small mb-0">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Buying adds a tire set you can later mount with “Change”. Sets and alerts can also be managed from the car's Tires section.
+                            </p>
+                        </div>
+
+                        {# Change — mount an existing set #}
+                        <div id="tire-change-fields" style="display:none">
+                            {% if tire_sets %}
+                            <div class="row g-3 mb-3">
+                                <div class="col-sm-7">
+                                    <label class="form-label fw-medium small">Mount which set? <span class="text-danger">*</span></label>
+                                    <select name="tire_set_id" class="form-select" required>
+                                        <option value="">— Select a tire set —</option>
+                                        {% for s in tire_sets %}
+                                        <option value="{{ s.id }}"
+                                            {% if expense and expense.tire_detail and expense.tire_detail.tire_set_id == s.id %}selected{% endif %}>
+                                            {{ s.display_name }}{% if s.tire_type %} · {{ s.tire_type }}{% endif %}{% if s.quantity %} · {{ s.quantity }} pcs{% endif %} ({{ s.status_label }})
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-sm-5">
+                                    <label class="form-label fw-medium small">Odometer at mount</label>
+                                    <div class="input-group">
+                                        <input type="number" name="tire_odometer" class="form-control" min="0" placeholder="km"
+                                               value="{{ expense.tire_detail.odometer if expense and expense.tire_detail and expense.tire_detail.action == 'change' and expense.tire_detail.odometer else '' }}">
+                                        <span class="input-group-text">km</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <p class="text-muted small mb-0">
+                                <i class="bi bi-info-circle me-1"></i>
+                                The odometer reading lets the app track km driven on each set.
+                            </p>
+                            {% else %}
+                            <div class="alert alert-secondary rounded-3 py-2 px-3 small mb-0">
+                                No tire sets for this car yet. Choose <strong>Buy new tires</strong> above, or add a set from the car's Tires section first.
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
                     {# ── Notes ── #}
                     <div class="mb-4">
                         <label class="form-label fw-medium small">Notes <span class="text-muted fw-normal">(optional)</span></label>
@@ -357,6 +482,23 @@ function switchType(type) {
     if (section) section.style.display = '';
     // Update hidden input
     document.getElementById('expenseTypeInput').value = type;
+    // Sync tire sub-fields (so the right inputs are enabled/required)
+    if (type === 'tire') {
+        const a = document.getElementById('tireActionSelect');
+        switchTireAction(a ? a.value : 'buy');
+    }
+}
+
+// Show the Buy or Change tire fields and disable the hidden ones, so a hidden
+// required field (the 'change' set selector) can never block form submission.
+function switchTireAction(action) {
+    [['tire-buy-fields', 'buy'], ['tire-change-fields', 'change']].forEach(([id, a]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const on = action === a;
+        el.style.display = on ? '' : 'none';
+        el.querySelectorAll('input, select').forEach(f => { f.disabled = !on; });
+    });
 }
 
 async function updateCZK() {
@@ -450,5 +592,12 @@ function toggleNotify(type) {
     const cb = document.getElementById(t + 'NotifyCheck');
     if (cb && cb.checked) toggleNotify(t);
 });
+
+// Init tire sub-fields on load (also disables the hidden 'change' required field
+// for non-tire types so it can't block submission).
+(function () {
+    const a = document.getElementById('tireActionSelect');
+    if (a) switchTireAction(a.value);
+})();
 </script>
 {% endblock %}

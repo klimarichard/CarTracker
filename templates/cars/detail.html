@@ -3,6 +3,143 @@
 
 {% block content %}
 
+{# ── Tire set form fields (shared by Add + Edit modals) ── #}
+{% macro tire_form_fields(s=None) %}
+<div class="row g-3">
+    <div class="col-sm-4">
+        <label class="form-label fw-medium small">Type</label>
+        <select name="tire_type" class="form-select">
+            <option value="">— Select —</option>
+            {% for tt in tire_types %}
+            <option value="{{ tt }}" {% if s and s.tire_type == tt %}selected{% endif %}>{{ tt }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-sm-5">
+        <label class="form-label fw-medium small">Brand / Model</label>
+        <input type="text" name="tire_brand" class="form-control" placeholder="e.g. Nokian Hakkapeliitta"
+               value="{{ s.brand if s and s.brand else '' }}">
+    </div>
+    <div class="col-sm-3">
+        <label class="form-label fw-medium small">Size</label>
+        <input type="text" name="tire_size" class="form-control" placeholder="205/55 R16"
+               value="{{ s.size if s and s.size else '' }}">
+    </div>
+    <div class="col-sm-4">
+        <label class="form-label fw-medium small">Quantity</label>
+        <input type="number" name="tire_quantity" class="form-control" min="1" max="12" placeholder="4"
+               value="{{ s.quantity if s and s.quantity else '' }}">
+    </div>
+    <div class="col-sm-8">
+        <label class="form-label fw-medium small">DOT code <span class="text-muted fw-normal">(week/year, e.g. 3621 = week 36 / 2021)</span></label>
+        <input type="text" name="tire_dot" class="form-control" maxlength="10" placeholder="3621"
+               value="{{ s.dot_code if s and s.dot_code else '' }}">
+    </div>
+    <div class="col-sm-4">
+        <label class="form-label fw-medium small">Alert if older than <span class="text-muted fw-normal">(months)</span></label>
+        <input type="number" name="tire_max_age_months" class="form-control" min="1" placeholder="e.g. 72"
+               value="{{ s.max_age_months if s and s.max_age_months else '' }}">
+    </div>
+    <div class="col-sm-4">
+        <label class="form-label fw-medium small">Alert if over <span class="text-muted fw-normal">(km)</span></label>
+        <input type="number" name="tire_max_km" class="form-control" min="1" placeholder="e.g. 40000"
+               value="{{ s.max_km if s and s.max_km else '' }}">
+    </div>
+    <div class="col-sm-4 d-flex align-items-end">
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="tire_notify_alerts" {% if s and s.notify_alerts %}checked{% endif %}>
+            <label class="form-check-label small">Email me these alerts</label>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+{# ── A single tire set card (+ its edit modal) ── #}
+{% macro tire_card(s) %}
+<div class="col-md-6 col-xl-4">
+    <div class="card h-100 {% if s.has_alert %}border-danger{% endif %} {% if s.retired %}opacity-75{% endif %}">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                <div class="fw-semibold">{{ s.display_name }}</div>
+                {% if s.retired %}
+                <span class="badge bg-secondary-subtle text-secondary border">Retired</span>
+                {% elif s.mounted %}
+                <span class="badge bg-success-subtle text-success border">Mounted</span>
+                {% else %}
+                <span class="badge bg-secondary-subtle text-secondary border">In storage</span>
+                {% endif %}
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                {% if s.tire_type %}<span class="badge-type badge-tire"><i class="bi bi-disc"></i>{{ s.tire_type }}</span>{% endif %}
+                {% if s.quantity %}<span class="text-muted small">{{ s.quantity }} pcs</span>{% endif %}
+            </div>
+            <ul class="list-unstyled small mb-3">
+                <li class="d-flex justify-content-between gap-2">
+                    <span class="text-muted">Age</span>
+                    <span class="text-end {% if s.is_too_old %}text-danger fw-semibold{% endif %}">
+                        {% if s.age_label %}{{ s.age_label }}{% if s.dot_code %} · DOT {{ s.dot_code }}{% endif %}{% else %}—{% endif %}
+                    </span>
+                </li>
+                <li class="d-flex justify-content-between gap-2">
+                    <span class="text-muted">Driven</span>
+                    <span class="{% if s.is_over_km %}text-danger fw-semibold{% endif %}">{{ '{:,}'.format(s.km_driven) }} km</span>
+                </li>
+                {% if s.purchase_date %}
+                <li class="d-flex justify-content-between gap-2">
+                    <span class="text-muted">Purchased</span><span>{{ s.purchase_date.strftime('%d.%m.%Y') }}</span>
+                </li>
+                {% endif %}
+                {% if s.max_age_months or s.max_km %}
+                <li class="d-flex justify-content-between gap-2">
+                    <span class="text-muted">Alerts</span>
+                    <span class="text-end">
+                        {% if s.max_age_months %}&gt;{{ s.max_age_months }} mo{% endif %}{% if s.max_age_months and s.max_km %} · {% endif %}{% if s.max_km %}&gt;{{ '{:,}'.format(s.max_km) }} km{% endif %}
+                        {% if s.notify_alerts %}<i class="bi bi-envelope-fill ms-1 text-muted" title="Email alerts on"></i>{% endif %}
+                    </span>
+                </li>
+                {% endif %}
+            </ul>
+            {% if s.can_edit(current_user) %}
+            <div class="d-flex gap-1">
+                <button class="btn btn-sm btn-outline-secondary rounded-3 py-0 px-2" data-bs-toggle="modal" data-bs-target="#editTire{{ s.id }}" title="Edit">
+                    <i class="bi bi-pencil"></i>
+                </button>
+                <form method="POST" action="{{ url_for('tire_set_retire', car_id=car.id, set_id=s.id) }}" style="display:inline">
+                    <button class="btn btn-sm btn-outline-secondary rounded-3 py-0 px-2"
+                            title="{% if s.retired %}Reactivate{% else %}Retire (mark not in use){% endif %}">
+                        <i class="bi {% if s.retired %}bi-arrow-counterclockwise{% else %}bi-archive{% endif %}"></i>
+                    </button>
+                </form>
+                <form method="POST" action="{{ url_for('tire_set_delete', car_id=car.id, set_id=s.id) }}" style="display:inline"
+                      onsubmit="return confirm('Delete this tire set? Change records that reference it are kept but unlinked.')">
+                    <button class="btn btn-sm btn-outline-danger rounded-3 py-0 px-2" title="Delete"><i class="bi bi-trash"></i></button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% if s.can_edit(current_user) %}
+<div class="modal fade" id="editTire{{ s.id }}" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('tire_set_edit', car_id=car.id, set_id=s.id) }}">
+                <div class="modal-header">
+                    <h5 class="modal-title fs-6">Edit tire set</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">{{ tire_form_fields(s) }}</div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary rounded-3" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary rounded-3">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endmacro %}
+
 {# ── Header ── #}
 <div class="page-header">
     <div>
@@ -152,6 +289,22 @@
 </div>
 {% endfor %}
 
+{# ── Tire alerts (age / mileage thresholds exceeded) ── #}
+{% for s in tire_alerts %}
+<div class="insurance-warning mb-2 d-flex align-items-center gap-2 flex-wrap" style="border-left-color:#dc3545">
+    <i class="bi bi-exclamation-triangle-fill text-danger flex-shrink-0"></i>
+    <span>
+        <strong>Tires:</strong> {{ s.display_name }}
+        {% if s.is_too_old %} — {{ s.age_label }} old (limit {{ s.max_age_months }} mo){% endif %}
+        {% if s.is_too_old and s.is_over_km %};{% endif %}
+        {% if s.is_over_km %} — {{ '{:,}'.format(s.km_driven) }} km driven (limit {{ '{:,}'.format(s.max_km) }} km){% endif %}
+    </span>
+    <div class="ms-auto d-flex gap-1 flex-shrink-0">
+        <a href="#tires" class="btn btn-sm btn-outline-secondary rounded-3 py-0">View</a>
+    </div>
+</div>
+{% endfor %}
+
 {# ── Stat row ── #}
 <div class="row g-3 mb-4">
     <div class="col-6 col-lg-3">
@@ -278,6 +431,63 @@
     </div>
 </div>
 {% endif %}
+{% endif %}
+
+{# ── Tires ── #}
+<div class="card mb-4" id="tires">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="fw-semibold text-muted mb-0"><i class="bi bi-disc me-2"></i>Tires</h6>
+            {% if not current_user.is_admin %}
+            <button class="btn btn-sm btn-outline-primary rounded-3" data-bs-toggle="modal" data-bs-target="#addTireModal">
+                <i class="bi bi-plus-lg me-1"></i>Add tire set
+            </button>
+            {% endif %}
+        </div>
+
+        {% if not active_tire_sets and not retired_tire_sets %}
+        <div class="empty-state py-4">
+            <i class="bi bi-disc" style="font-size:2.5rem; opacity:.2"></i>
+            <p class="text-muted small mt-2 mb-0">No tire sets yet. Add one, or log a “Buy” tire expense.</p>
+        </div>
+        {% else %}
+        <div class="row g-3">
+            {% for s in active_tire_sets %}{{ tire_card(s) }}{% endfor %}
+        </div>
+        {% if retired_tire_sets %}
+        <div class="text-muted small fw-semibold mt-4 mb-2"><i class="bi bi-archive me-1"></i>Retired</div>
+        <div class="row g-3">
+            {% for s in retired_tire_sets %}{{ tire_card(s) }}{% endfor %}
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+{% if not current_user.is_admin %}
+<div class="modal fade" id="addTireModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('tire_set_new', car_id=car.id) }}">
+                <div class="modal-header">
+                    <h5 class="modal-title fs-6">Add tire set</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    {{ tire_form_fields() }}
+                    <p class="text-muted small mt-2 mb-0">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Adds a set to inventory without an expense. Mount it later with a “Change” tire expense.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary rounded-3" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary rounded-3">Add set</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 {% endif %}
 
 {# ── Expenses table ── #}

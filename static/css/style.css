@@ -45,6 +45,7 @@ body {
 .badge-toll     { background: #fef9e7; color: #b45309; border-color: #fde68a; }
 .badge-insurance { background: #e6f4ea; color: #166534; border-color: #a7f3d0; }
 .badge-gadget   { background: #f3e8ff; color: #6d28d9; border-color: #ddd6fe; }
+.badge-tire     { background: #d3f5ec; color: #0f766e; border-color: #99e9d3; }
 
 /* ─── Stat icon boxes ────────────────────────────────────────────────────────── */
 .stat-icon {
@@ -148,6 +149,7 @@ body {
 .type-tab.active-toll     { border-color: #ffc107; background: #fef9e7; color: #b45309; }
 .type-tab.active-insurance { border-color: #198754; background: #e6f4ea; color: #166534; }
 .type-tab.active-gadget   { border-color: #6f42c1; background: #f3e8ff; color: #6d28d9; }
+.type-tab.active-tire     { border-color: #20c997; background: #d3f5ec; color: #0f766e; }
 
 /* ─── Page headings ──────────────────────────────────────────────────────────── */
 .page-header {
