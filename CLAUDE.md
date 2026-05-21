@@ -217,4 +217,4 @@ Configured for Railway via `Procfile` and `railway.toml`. Set `SECRET_KEY` env v
 
 Two GitHub Actions workflows dump the Railway Postgres DB with `pg_dump` (run in a `postgres:18` container so the client version matches the server) and keep the result as a 90-day downloadable artifact. Both read the `BACKUP_DATABASE_URL` repo secret:
 - `.github/workflows/backup.yml` — daily at 03:00 UTC, plus manual (`workflow_dispatch`).
-- `.github/workflows/predeploy-backup.yml` — on every push to `main` (the deploy branch) and manual, so a fresh snapshot is captured around each deploy, before its migrations run.
+- `.github/workflows/predeploy-backup.yml` — on every push to `main` (the deploy branch) and manual. This run is the **deploy gate**: the Railway service has **"Wait for CI"** enabled, so Railway holds the deploy until this backup check succeeds — a migration never runs without a fresh backup of that commit. A failed backup (e.g. missing `BACKUP_DATABASE_URL`) fails the check and blocks the deploy. (Manual "Redeploy" from the Railway dashboard redeploys an already-backed-up commit and isn't gated by CI.)

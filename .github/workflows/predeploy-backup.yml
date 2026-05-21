@@ -1,9 +1,11 @@
-name: Pre-deploy database backup
+name: Pre-deploy backup (deploy gate)
 
-# Snapshots the Railway Postgres database on every push to main (the branch
-# Railway deploys from) and on demand, so a fresh dump is always captured
-# around each deploy — before its migrations run. Kept as a downloadable
-# artifact, same format/mechanism as the daily backup.
+# Dumps the Railway Postgres database on every push to main (the deploy branch)
+# and on demand. This run is the deploy GATE: with "Wait for CI" enabled on the
+# Railway service, Railway holds the deploy until this check succeeds, so a
+# migration never runs without a fresh backup of that exact commit. If the
+# backup fails (e.g. missing secret), the check fails and the deploy is blocked.
+# Same mechanism as the daily backup (pg_dump in postgres:18 -> 90-day artifact).
 on:
   push:
     branches: [main]
