@@ -239,12 +239,18 @@ class FuelDetail(db.Model):
     odometer = db.Column(db.Integer)
     station_location = db.Column(db.String(200))
     transaction_time = db.Column(db.Time)
+    # True = tank was NOT filled to full; the litres are carried over to the
+    # next full fill instead of forming an efficiency point of their own.
+    partial_fill = db.Column(db.Boolean, nullable=False, default=False,
+                             server_default='0')
 
     @property
     def summary(self):
         parts = []
         if self.liters:
             parts.append(f'{self.liters:.1f} L')
+        if self.partial_fill:
+            parts.append('partial fill')
         if self.station_location:
             parts.append(self.station_location)
         if self.odometer:
@@ -596,6 +602,71 @@ def _car_latest_odometer(car):
         if e.tire_detail and e.tire_detail.odometer:
             readings.append(e.tire_detail.odometer)
     return max(readings) if readings else None
+
+
+def _fuel_efficiency_series(expenses, eff_from=None, eff_to=None):
+    """Fuel efficiency (L/100 km) by the full-to-full method.
+
+    A fill marked "not a full tank" (``partial_fill``) yields no point of its
+    own: its litres are carried forward and counted into the next full fill,
+    whose segment then spans every litre bought since the previous full tank.
+    Only a full tank gives a known reference level, so only a full tank closes a
+    segment. A full fill with no odometer breaks the chain (unknown distance); a
+    partial fill needs no odometer at all, since the distance comes from the full
+    fills bracketing it.
+
+    Returns ``(labels, data, meta, overall, pending_liters)`` where *meta* holds
+    the litres/km/fill-count behind each point and *pending_liters* is what has
+    been bought since the last full tank and is not yet attributable to any
+    distance.
+    """
+    in_range = [e for e in expenses
+                if e.expense_type == 'fuel' and e.fuel_detail and e.fuel_detail.liters
+                and (eff_from is None or e.date >= eff_from)
+                and (eff_to   is None or e.date <= eff_to)]
+
+    # Order by odometer (monotonic, so a mistyped date can't scramble the chain),
+    # placing odometer-less partial fills right after the last reading before them.
+    by_date = sorted(in_range, key=lambda e: (e.date, e.created_at or datetime.min))
+    sort_odo, last_odo = {}, -1
+    for e in by_date:
+        if e.fuel_detail.odometer:
+            last_odo = e.fuel_detail.odometer
+        sort_odo[id(e)] = last_odo
+    fuel_exps = sorted(by_date, key=lambda e: sort_odo[id(e)])  # stable: ties keep date order
+
+    labels, data, meta = [], [], []
+    total_liters = total_km = 0        # accumulated over measured segments only
+    anchor = None                      # last full fill that carried an odometer
+    carried_liters, carried_fills = 0.0, 0
+
+    for e in fuel_exps:
+        d = e.fuel_detail
+        if d.partial_fill:
+            if anchor is not None:     # litres before the first full tank have no baseline
+                carried_liters += d.liters
+                carried_fills += 1
+            continue
+
+        if not d.odometer:             # full tank, but distance is unknown → break the chain
+            anchor, carried_liters, carried_fills = None, 0.0, 0
+            continue
+
+        if anchor is not None:
+            dist = d.odometer - anchor.fuel_detail.odometer
+            if dist > 0:
+                liters = carried_liters + d.liters
+                labels.append(e.date.strftime('%d.%m.%Y'))
+                data.append(round(liters / dist * 100, 2))
+                meta.append({'fills': carried_fills + 1,
+                             'liters': round(liters, 2), 'km': dist})
+                total_liters += liters
+                total_km += dist
+        anchor, carried_liters, carried_fills = e, 0.0, 0
+
+    overall = round(total_liters / total_km * 100, 2) if total_km > 0 else None
+    pending = round(carried_liters, 2) if carried_liters else 0
+    return labels, data, meta, overall, pending
 
 
 def _recompute_tire_state(car):
@@ -1172,30 +1243,8 @@ def car_detail(car_id):
     except ValueError:
         eff_to = None
 
-    # Fuel efficiency L/100 km
-    fuel_exps = sorted(
-        [e for e in expenses
-         if e.expense_type == 'fuel' and e.fuel_detail
-         and e.fuel_detail.odometer and e.fuel_detail.liters
-         and (eff_from is None or e.date >= eff_from)
-         and (eff_to   is None or e.date <= eff_to)],
-        key=lambda e: e.fuel_detail.odometer,
-    )
-    eff_labels, eff_data = [], []
-    for i in range(1, len(fuel_exps)):
-        dist = fuel_exps[i].fuel_detail.odometer - fuel_exps[i - 1].fuel_detail.odometer
-        if dist > 0:
-            eff = fuel_exps[i].fuel_detail.liters / dist * 100
-            eff_labels.append(fuel_exps[i].date.strftime('%d.%m.%Y'))
-            eff_data.append(round(eff, 2))
-
-    # Overall efficiency: total liters (fills 2..n) / total km
-    overall_eff = None
-    if len(fuel_exps) >= 2:
-        total_liters = sum(e.fuel_detail.liters for e in fuel_exps[1:])
-        total_km = fuel_exps[-1].fuel_detail.odometer - fuel_exps[0].fuel_detail.odometer
-        if total_km > 0:
-            overall_eff = round(total_liters / total_km * 100, 2)
+    (eff_labels, eff_data, eff_meta, overall_eff,
+     pending_eff_liters) = _fuel_efficiency_series(expenses, eff_from, eff_to)
 
     # Expiry warnings — suppressed when a newer non-expired entry with the same key exists
     raw_toll_warnings = [
@@ -1265,7 +1314,8 @@ def car_detail(car_id):
             'data': list(type_totals.values()),
             'colors': [TYPE_COLORS.get(t, '#6c757d') for t in type_totals],
         },
-        chart_fuel_eff={'labels': eff_labels, 'data': eff_data},
+        chart_fuel_eff={'labels': eff_labels, 'data': eff_data, 'meta': eff_meta},
+        pending_eff_liters=pending_eff_liters,
     )
 
 
@@ -1438,6 +1488,7 @@ def _apply_type_detail(expense, form):
             d.price_per_liter = ppl
         except (ValueError, TypeError):
             d.liters = d.price_per_liter = d.odometer = None
+        d.partial_fill = bool(form.get('partial_fill'))
         d.station_location = form.get('station_location', '').strip() or None
         time_str = form.get('transaction_time', '').strip()
         try:
@@ -1843,6 +1894,8 @@ def admin_overview():
                 fields.append(['Odometer', f'{fd.odometer:,} km'])
             if fd.station_location:
                 fields.append(['Station', fd.station_location])
+            if fd.partial_fill:
+                fields.append(['Fill', 'Not a full tank'])
             d['fields'] = fields
         elif e.expense_type == 'repair' and e.repair_detail:
             if e.repair_detail.description:

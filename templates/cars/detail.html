@@ -356,7 +356,7 @@
                     <i class="bi bi-fuel-pump text-warning"></i>
                 </div>
                 <div>
-                    <div class="text-muted small">Last Efficiency</div>
+                    <div class="text-muted small" title="Measured between the last two full tanks">Last Efficiency</div>
                     <div class="fw-bold fs-6">{{ latest_eff }} L/100 km</div>
                 </div>
             </div>
@@ -423,10 +423,23 @@
         <canvas id="fuelEffChart" height="80"></canvas>
         <p class="text-muted small mt-2 mb-0">
             <i class="bi bi-info-circle me-1"></i>
-            Each point = liters filled ÷ km since last fill-up. Overall = total liters ÷ total km driven in the selected period.
+            Each point = all liters bought since the previous full tank ÷ km driven between the two.
+            Fill-ups marked <em>not a full tank</em> get no point of their own — their liters count
+            into the next full tank. Overall = total liters ÷ total km measured in the selected period.
+            {% if pending_eff_liters %}
+            <br>
+            <i class="bi bi-hourglass-split me-1"></i>
+            {{ pending_eff_liters }} L bought since the last full tank — counted at your next full fill-up.
+            {% endif %}
         </p>
         {% else %}
-        <p class="text-muted small mb-0">No fill-ups with odometer readings in the selected date range.</p>
+        <p class="text-muted small mb-0">
+            Not enough data in the selected date range — the chart needs at least two full
+            tanks with odometer readings.
+            {% if pending_eff_liters %}
+            ({{ pending_eff_liters }} L bought since the last full tank is waiting for the next full fill-up.)
+            {% endif %}
+        </p>
         {% endif %}
     </div>
 </div>
@@ -641,7 +654,21 @@ if (fuelData.labels.length > 0) {
         },
         options: {
             responsive: true,
-            plugins: { legend: { display: false } },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        // Second line spells out the full-to-full segment behind the point,
+                        // so a value that merged several partial fills is self-explanatory.
+                        afterLabel: (ctx) => {
+                            const m = (fuelData.meta || [])[ctx.dataIndex];
+                            if (!m) return '';
+                            const fills = m.fills > 1 ? `${m.fills} fill-ups` : '1 fill-up';
+                            return `${m.liters} L over ${m.km.toLocaleString()} km (${fills})`;
+                        }
+                    }
+                }
+            },
             scales: {
                 x: { grid: { display: false }, ticks: { color: '#6c757d', maxTicksLimit: 8 } },
                 y: { beginAtZero: false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#6c757d' } }

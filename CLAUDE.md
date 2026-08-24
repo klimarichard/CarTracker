@@ -66,7 +66,7 @@ UserCarHidden              (per-user car visibility toggle)
 **DismissedWarning**: per-user, per-expense record for permanently dismissed expiry banners (session-based dismissal also supported via Flask session).
 
 **Detail models** (each has an `expense_id` FK):
-- `FuelDetail`: `liters`, `price_per_liter`, `odometer`, `station_location`, `transaction_time`
+- `FuelDetail`: `liters`, `price_per_liter`, `odometer`, `station_location`, `transaction_time`, `partial_fill` (“Not a full tank” — see **Fuel efficiency** below)
 - `RepairDetail`: `description`
 - `TollDetail`: `route`, `toll_type`, `expiration_date`, `notify_before_expiry`, `notify_days_before`, `notification_sent`
 - `InsuranceDetail`: `insurance_type`, `provider`, `expiration_date`, `notify_before_expiry`, `notify_days_before`, `notification_sent`
@@ -93,6 +93,27 @@ UserCarHidden              (per-user car visibility toggle)
 - `User.get_visible_cars()` — accessible cars minus: ones the user personally hidden (`UserCarHidden`) or the owner hid globally (`Car.hidden_from_shared`)
 - `User.get_hidden_cars()` — hidden cars with `can_restore` flag (only personally hidden ones can be unhidden by the user)
 - Dashboard stats use all accessible cars; the car grid uses only visible cars
+
+### Fuel efficiency
+
+Computed by `_fuel_efficiency_series()` using the **full-to-full** method, not per-fill-up. A fill
+whose `FuelDetail.partial_fill` is set (the “Not a full tank” checkbox on the fuel form) produces no
+chart point of its own: its litres are carried forward and counted into the next full fill, whose
+segment then spans every litre bought since the previous full tank. Only a full tank is a known
+reference level, so only a full tank closes a segment.
+
+- A segment's litres include the **closing** fill but not the **opening** one — the opening fill's fuel
+  was burned before the segment began.
+- A partial fill needs no odometer (the distance comes from the full fills bracketing it); it is
+  ordered by date relative to its neighbours. A **full** fill with no odometer breaks the chain — no
+  point, accumulator reset — rather than inventing a distance.
+- Partials before the first full fill are discarded (no baseline). Litres bought after the last full
+  fill are reported as `pending_eff_liters` and shown as a note under the chart.
+- `overall_eff` sums litres and km over measured segments only, so trailing partials and chain breaks
+  can't skew it. “Last Efficiency” on car detail is simply the newest chart point.
+- `meta` carries `{fills, liters, km}` per point, used for the chart tooltip.
+
+Existing rows migrated with `server_default='0'`, i.e. every historical fill reads as a full tank.
 
 ### Exchange rates
 
@@ -149,7 +170,7 @@ templates/
 
 The expense form (`templates/expenses/form.html`) handles all seven expense types — JavaScript shows/hides the relevant field section via `switchType(type)`. The `tire` section adds a Buy/Change sub-toggle (`switchTireAction()`) that shows the right fields and disables the hidden sub-section's inputs so its hidden `required` set-selector can't block submission. For fuel, `price_per_liter` is computed client-side from `amount ÷ liters`; the server recomputes it as a fallback in `_apply_type_detail()`. Past station locations are passed as `past_stations` for autocomplete. The form also supports a **renew flow**: `?renewing=<expense_id>` shows the original expense as context, and `pf_*` query params prefill field values.
 
-Charts use Chart.js (CDN). Car detail page has three charts: stacked monthly bar, type doughnut, and fuel efficiency line (L/100 km, calculated between consecutive odometer readings). Dashboard has monthly bar and type doughnut.
+Charts use Chart.js (CDN). Car detail page has three charts: stacked monthly bar, type doughnut, and fuel efficiency line (L/100 km, full-tank to full-tank — see **Fuel efficiency**). Dashboard has monthly bar and type doughnut.
 
 **Expiry warning banners** on car detail can be dismissed per-session (`POST /warnings/<id>/dismiss`) or permanently (`POST /warnings/<id>/dismiss-permanent`, stored in `DismissedWarning`). Superseded warnings (e.g. a newer non-expired inspection exists) are filtered out automatically via `_filter_superseded_*` helpers.
 
@@ -157,6 +178,7 @@ Charts use Chart.js (CDN). Car detail page has three charts: stacked monthly bar
 
 - `_parse_expense_form(form)` — validates and parses common expense fields, returns `(data_dict, error_str)`
 - `_apply_type_detail(expense, form)` — upserts the type-specific detail row
+- `_fuel_efficiency_series(expenses, eff_from, eff_to)` — full-to-full L/100 km series; returns `(labels, data, meta, overall, pending_liters)`
 - `_get_past_stations(user)` — returns distinct fuel station names across all accessible cars (for autocomplete)
 - `_export_xlsx(expenses, include_user, filename)` — builds and streams an Excel file via openpyxl; used by `/expenses/export` and `/admin/overview/export`
 - `_build_policy_entries(expenses)` — groups `POLICY_TYPES` expenses into `{type: {active: [], expired: []}}` for the active policies view
