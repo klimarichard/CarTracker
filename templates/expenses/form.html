@@ -155,18 +155,19 @@
 
                         <div class="mb-3">
                             <label class="form-label fw-medium small">Fuel Station Location</label>
-                            <div class="input-group">
-                                <span class="input-group-text"><i class="bi bi-geo-alt"></i></span>
-                                <input type="text" name="station_location" class="form-control"
-                                       list="stationList" autocomplete="off"
-                                       placeholder="e.g. Shell Praha - Smíchov"
-                                       value="{{ expense.fuel_detail.station_location if expense and expense.fuel_detail and expense.fuel_detail.station_location else '' }}">
+                            {# Custom suggestion list instead of <datalist>, which most mobile browsers don't render #}
+                            <div class="position-relative">
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-geo-alt"></i></span>
+                                    <input type="text" name="station_location" id="stationInput" class="form-control"
+                                           autocomplete="off" role="combobox" aria-autocomplete="list"
+                                           aria-expanded="false" aria-controls="stationSuggestions"
+                                           placeholder="e.g. Shell Praha - Smíchov"
+                                           value="{{ expense.fuel_detail.station_location if expense and expense.fuel_detail and expense.fuel_detail.station_location else '' }}">
+                                </div>
+                                <ul id="stationSuggestions" class="dropdown-menu w-100 shadow-sm" role="listbox"
+                                    style="max-height: 14rem; overflow-y: auto;"></ul>
                             </div>
-                            <datalist id="stationList">
-                                {% for s in past_stations %}
-                                <option value="{{ s }}">
-                                {% endfor %}
-                            </datalist>
                         </div>
                     </div>
 
@@ -612,6 +613,74 @@ function toggleNotify(type) {
 (function () {
     const a = document.getElementById('tireActionSelect');
     if (a) switchTireAction(a.value);
+})();
+
+// Station autocomplete: a hand-rolled dropdown, because <datalist> is ignored or
+// barely shown by mobile browsers. Matching is case- and accent-insensitive.
+(function () {
+    const input = document.getElementById('stationInput');
+    const menu  = document.getElementById('stationSuggestions');
+    const stations = {{ past_stations | list | tojson }}.filter(Boolean);
+    if (!input || !menu || !stations.length) return;
+
+    const fold = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const folded = stations.map(fold);
+    let active = -1;
+
+    function close() {
+        menu.classList.remove('show');
+        input.setAttribute('aria-expanded', 'false');
+        active = -1;
+    }
+    function highlight(i) {
+        const items = menu.querySelectorAll('.dropdown-item');
+        items.forEach((el, j) => el.classList.toggle('active', j === i));
+        active = i;
+        if (items[i]) items[i].scrollIntoView({ block: 'nearest' });
+    }
+    function render() {
+        const q = fold(input.value.trim());
+        const matches = stations.filter((s, i) => folded[i].includes(q) && s !== input.value);
+        menu.replaceChildren();
+        if (!matches.length) return close();
+        matches.slice(0, 50).forEach(s => {
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'dropdown-item text-wrap';
+            btn.setAttribute('role', 'option');
+            btn.textContent = s;
+            // pointerdown fires before the input's blur, so the tap isn't lost on mobile
+            btn.addEventListener('pointerdown', e => { e.preventDefault(); pick(s); });
+            li.appendChild(btn);
+            menu.appendChild(li);
+        });
+        active = -1;
+        menu.classList.add('show');
+        input.setAttribute('aria-expanded', 'true');
+    }
+    function pick(s) {
+        input.value = s;
+        close();
+    }
+
+    input.addEventListener('focus', render);
+    input.addEventListener('input', render);
+    input.addEventListener('blur', close);
+    input.addEventListener('keydown', e => {
+        if (!menu.classList.contains('show')) {
+            if (e.key === 'ArrowDown') { render(); e.preventDefault(); }
+            return;
+        }
+        const n = menu.querySelectorAll('.dropdown-item').length;
+        if (e.key === 'ArrowDown') { highlight((active + 1) % n); e.preventDefault(); }
+        else if (e.key === 'ArrowUp') { highlight((active - 1 + n) % n); e.preventDefault(); }
+        else if (e.key === 'Enter' && active >= 0) {
+            pick(menu.querySelectorAll('.dropdown-item')[active].textContent);
+            e.preventDefault();  // pick the suggestion instead of submitting the form
+        }
+        else if (e.key === 'Escape') close();
+    });
 })();
 </script>
 {% endblock %}
