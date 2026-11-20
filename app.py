@@ -23,10 +23,14 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'change-this-secret-key-in-production')
 
-# Railway provides postgres:// but SQLAlchemy requires postgresql://
+# Railway provides postgres:// (or postgresql://) with no driver. Pin the driver
+# explicitly: SQLAlchemy 2.1 changed the default for postgresql:// from psycopg2
+# to psycopg (v3), and we only install psycopg2-binary.
 _db_url = os.environ.get('DATABASE_URL', 'sqlite:///carexpenses.db')
-if _db_url.startswith('postgres://'):
-    _db_url = _db_url.replace('postgres://', 'postgresql://', 1)
+for _prefix in ('postgres://', 'postgresql://'):
+    if _db_url.startswith(_prefix):
+        _db_url = 'postgresql+psycopg2://' + _db_url[len(_prefix):]
+        break
 app.config['SQLALCHEMY_DATABASE_URI'] = _db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Verify pooled connections are still alive before use (Railway Postgres drops idle ones)
